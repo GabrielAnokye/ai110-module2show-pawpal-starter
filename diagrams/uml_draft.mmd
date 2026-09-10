@@ -1,0 +1,55 @@
+classDiagram
+    %% PawPal+ — smart pet care management system
+    %% Keep this file updated so it matches your final implementation in pawpal_system.py
+
+    class Owner {
+        +str name
+        +str email
+        +int available_minutes
+        +time day_start
+        +List~Pet~ pets
+        +add_pet(pet: Pet) None
+        +remove_pet(pet_name: str) bool
+        +get_pet(pet_name: str) Pet
+    }
+
+    class Pet {
+        +str name
+        +str species
+        +str breed
+        +float age_years
+        +str notes
+        +List~Task~ tasks
+        +add_task(task: Task) None
+        +remove_task(task_id: str) bool
+        +update_task(task_id: str, fields: dict) Task
+        +pending_tasks() List~Task~
+    }
+
+    class Task {
+        +str task_id
+        +str title
+        +str category
+        +int duration_minutes
+        +str priority
+        +time preferred_time
+        +bool completed
+        +time start_time
+        +weight() float
+        +mark_complete() None
+        +describe() str
+    }
+
+    class Scheduler {
+        +str strategy
+        +build_plan(owner: Owner, pet: Pet) dict
+        +sort_tasks(tasks: List~Task~) List~Task~
+        +filter_by_time(tasks: List~Task~, budget: int) List~Task~
+        +assign_times(tasks: List~Task~, day_start: time) List~Task~
+        +explain(plan: dict) str
+    }
+
+    Owner "1" *-- "0..*" Pet : cares for
+    Pet "1" *-- "0..*" Task : needs
+    Scheduler ..> Owner : reads constraints from
+    Scheduler ..> Pet : schedules tasks for
