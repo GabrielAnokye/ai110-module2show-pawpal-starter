@@ -44,14 +44,38 @@ pip install -r requirements.txt
 
 ## 🖥️ Sample Output
 
-Paste a sample of your app's CLI or Streamlit output here so a reader can see what a generated plan looks like:
+Sample CLI output from running `python main.py` demonstrating multi-pet scheduling across an owner's daily time budget:
 
-```
-# e.g.:
-# Daily plan for Biscuit (Golden Retriever):
-#   08:00 — Morning walk (30 min) [priority: high]
-#   09:00 — Feeding (10 min) [priority: high]
-#   ...
+```text
+======================================================================
+🐾                    PAWPAL+ DAILY CARE SCHEDULER                    🐾
+======================================================================
+
+👤 Owner Registered: Jordan Lee
+⏰ Daily Time Budget: 90 minutes (Starting at 08:00)
+
+🐶 Registered Pets: Biscuit (Golden Retriever) and 🐱 Mochi (Scottish Fold)
+
+📋 Total Tasks Added: 5 pending across all pets.
+
+🧠 Building schedule using strategy: 'priority_first'...
+
+📅 TODAY'S ITINERARY:
+Start Time   | Pet        | Priority   | Duration   | Task Description
+----------------------------------------------------------------------
+08:00        | Mochi      | CRITICAL   | 15 min     | Insulin Injection
+08:15        | Biscuit    | HIGH       | 30 min     | Morning Walk
+08:45        | Biscuit    | HIGH       | 15 min     | Breakfast Feeding
+09:00        | Mochi      | MEDIUM     | 20 min     | Brushing & Coat Care
+----------------------------------------------------------------------
+
+⚠️  SKIPPED TASKS (Exceeded Owner's 90-minute Budget):
+  • [LOW] Agility Park Play for Biscuit (40 min)
+
+📊 Summary: 4 tasks scheduled (80/90 min), 1 skipped.
+⏳ Remaining Time Buffer: 10 min
+
+======================================================================
 ```
 
 ## 🧪 Testing PawPal+
@@ -66,8 +90,21 @@ pytest --cov
 
 Sample test output:
 
-```
-# Paste your pytest output here
+```text
+============================== test session starts ==============================
+platform darwin -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- venv/bin/python
+rootdir: /Users/gabrielanokye/AI Engineer/ai110-module2show-pawpal-starter
+configfile: pytest.ini
+testpaths: tests
+collected 5 items
+
+tests/test_pawpal.py::test_task_completion_status PASSED                 [ 20%]
+tests/test_pawpal.py::test_pet_task_management PASSED                    [ 40%]
+tests/test_pawpal.py::test_owner_task_aggregation PASSED                 [ 60%]
+tests/test_pawpal.py::test_scheduler_daily_schedule_ordering PASSED      [ 80%]
+tests/test_pawpal.py::test_scheduler_build_plan_budget_filtering PASSED  [100%]
+
+============================== 5 passed in 0.02s ===============================
 ```
 
 ## 📐 Smarter Scheduling

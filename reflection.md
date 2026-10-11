@@ -27,13 +27,38 @@ These are the three things a user must be able to do for PawPal+ to be useful.
 **a. Initial design**
 
 - Briefly describe your initial UML design.
+The initial UMl consisted of 8 classes with individual tasks are subclasses.
 - What classes did you include, and what responsibilities did you assign to each?
+Owner: Manages user details, scheduling preferences, and maintains a collection of pets.
 
+Preferences: Stores time-based constraints, such as available minutes, active hours (start/end), and blackout windows.
+
+Pet: Represents a specific pet (with details like species and age) and manages the list of tasks required for its care.
+CareTask (Abstract): The base class for all tasks, managing shared properties like duration, priority, preferred time, and completion status.
+
+Feeding: A specific task managing food types and portions.
+
+Walk: A specific task tracking distance and whether it requires daylight.
+
+Medication: A specific task tracking drug names, dosages, and if it must be taken with food.
+
+Appointment: A specific task managing fixed-time events, locations, and providers.
+Scheduler: The logic engine that builds daily plans by sorting tasks, filtering them against time budgets, assigning times, and detecting conflicts.
+
+DailyPlan: The generated daily itinerary for a pet, tracking which tasks were scheduled, which were skipped, and the remaining time budget.
+
+ScheduledTask: A wrapper for a CareTask that assigns it a concrete start and end time and handles overlap logic.
+Priority: Standardized importance levels (LOW, MEDIUM, HIGH, CRITICAL) for tasks.
+
+Species: Standardized animal types (DOG, CAT, BIRD, OTHER).
 **b. Design changes**
 
 - Did your design change during implementation?
+Yes, The number of classes was reduced to 4
 - If yes, describe at least one change and why you made it.
-
+   1. **Multi-Pet Relationship on `Task` and `Scheduler`**:
+   - *Change*: Added a `pet_name` reference to `Task` and updated `Scheduler.build_plan` from `(owner, pet)` to `(owner, pets=None)` so it schedules across all pets belonging to the owner.
+   - *Why*: In the initial draft, tasks lacked a backlink to the pet they belonged to, which meant multi-pet schedules lost context on which pet required which task. Updating `Scheduler.build_plan` also aligns directly with the core requirement of managing tasks across multiple pets.
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
