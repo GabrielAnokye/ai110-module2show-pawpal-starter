@@ -276,6 +276,15 @@ with tab_dashboard:
 
     # Requirement 2: Schedule Table & Interactive Completion
     st.subheader("🗓️ Today's Schedule")
+
+    # Conflict Detection Alert
+    detected_conflicts = st.session_state.scheduler.detect_conflicts()
+    if detected_conflicts:
+        with st.container():
+            st.warning(f"⚠️ **{len(detected_conflicts)} Schedule Conflict(s) Detected:**")
+            for conf in detected_conflicts:
+                st.caption(f"• {conf['warning_message']}")
+
     daily_schedule = st.session_state.scheduler.get_daily_schedule(st.session_state.owner)
 
     if not daily_schedule:
@@ -337,7 +346,7 @@ with tab_dashboard:
                         type="primary",
                         help="Mark task complete",
                     ):
-                        task.mark_complete()
+                        st.session_state.scheduler.complete_task(task.task_id)
                         st.rerun()
 
     # Algorithmic Budget Breakdown Expander
@@ -407,6 +416,7 @@ with tab_manage:
                     "Duration in minutes", min_value=1, max_value=240, value=30, step=5
                 )
                 priority = st.selectbox("Priority", ["LOW", "MEDIUM", "HIGH"], index=1)
+                recurrence = st.selectbox("Recurrence", ["NONE", "DAILY", "WEEKLY"], index=0)
 
                 submit_task = st.form_submit_button("➕ Add Task", use_container_width=True)
                 if submit_task:
@@ -450,6 +460,7 @@ with tab_manage:
                             scheduled_time=task_time,
                             scheduled_datetime=task_dt,
                             pet_name=selected_pet.name,
+                            recurrence=recurrence,
                             task_id=task_id,
                         )
                         selected_pet.add_task(new_task)

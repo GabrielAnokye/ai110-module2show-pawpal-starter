@@ -4,7 +4,7 @@ Verifies Task completion states, Pet task management, Owner multi-pet
 task aggregation, and Scheduler chronological daily schedule ordering.
 """
 
-from datetime import time
+from datetime import date, datetime, time
 import pytest
 from pawpal_system import Owner, Pet, Scheduler, Task
 
@@ -149,3 +149,162 @@ def test_scheduler_build_plan_budget_filtering(sample_owner, sample_pets, schedu
     assert med_task in scheduled
     assert low_task in skipped
     assert plan["minutes_used"] == 45
+
+
+def test_scheduler_multi_attribute_sorting():
+    """Verify sort_by_time and sort_by_priority methods with tie-breaking logic."""
+    scheduler = Scheduler()
+    t_meds = Task(title="Morning Meds", duration_minutes=15, scheduled_time=time(9, 0), priority="high")
+    t_play = Task(title="Play Time", duration_minutes=30, scheduled_time=time(9, 0), priority="low")
+    t_walk = Task(title="Early Walk", duration_minutes=20, scheduled_time=time(8, 0), priority="medium")
+
+    # sort_by_time: 08:00 first, then at 09:00 high priority (t_meds) before low priority (t_play)
+    by_time = scheduler.sort_by_time([t_meds, t_play, t_walk])
+    assert by_time == [t_walk, t_meds, t_play]
+
+    # sort_by_priority: high (t_meds) -> medium (t_walk) -> low (t_play)
+    by_prio = scheduler.sort_by_priority([t_meds, t_play, t_walk])
+    assert by_prio == [t_meds, t_walk, t_play]
+
+
+def test_scheduler_multi_criteria_filtering(sample_owner, sample_pets):
+    """Verify filter_tasks filtering across all owner pets by pet name, status, and priority."""
+    owner = sample_owner
+    pet_a, pet_b = sample_pets
+
+    t1 = Task(title="Luna Walk", duration_minutes=30, priority="high")
+    t2 = Task(title="Luna Brush", duration_minutes=15, priority="low")
+    t2.mark_complete()
+    t3 = Task(title="Milo Vet", duration_minutes=45, priority="high")
+
+    pet_a.add_task(t1)
+    pet_a.add_task(t2)
+    pet_b.add_task(t3)
+    owner.add_pet(pet_a)
+    owner.add_pet(pet_b)
+
+    scheduler = Scheduler(owner=owner)
+
+    # Filter by pet name
+    luna_tasks = scheduler.filter_tasks(pet_name="Luna")
+    assert len(luna_tasks) == 2
+    assert t1 in luna_tasks and t2 in luna_tasks
+
+    # Filter by completion status
+    completed = scheduler.filter_tasks(is_completed=True)
+    assert len(completed) == 1 and completed[0].title == "Luna Brush"
+
+    # Filter by priority
+    high_tasks = scheduler.filter_tasks(priority="high")
+    assert len(high_tasks) == 2
+    assert t1 in high_tasks and t3 in high_tasks
+
+
+def test_scheduler_find_next_available_slot(sample_owner, sample_pets):
+    """Verify finding the earliest continuous slot within operating hours across all pets."""
+    owner = sample_owner
+    pet_a, pet_b = sample_pets
+    search_d = date(2026, 10, 15)
+
+    # Pet A has morning task 08:00 - 08:30
+    t1 = Task(
+        title="Walk",
+        duration_minutes=30,
+        scheduled_time=time(8, 0),
+        scheduled_datetime=datetime(2026, 10, 15, 8, 0),
+    )
+    # Pet B has vet visit 09:00 - 10:00
+    t2 = Task(
+        title="Vet",
+        duration_minutes=60,
+        scheduled_time=time(9, 0),
+        scheduled_datetime=datetime(2026, 10, 15, 9, 0),
+    )
+
+    pet_a.add_task(t1)
+    pet_b.add_task(t2)
+    owner.add_pet(pet_a)
+    owner.add_pet(pet_b)
+
+    scheduler = Scheduler(owner=owner)
+
+    # Gap between 08:30 and 09:00 is 30 mins:
+    # A 30-min slot should fit right at 08:30:
+    slot_30 = scheduler.find_next_available_slot(duration_minutes=30, search_date=search_d)
+    assert slot_30 == datetime(2026, 10, 15, 8, 30)
+
+    # A 45-min slot cannot fit between 08:30 and 09:00, so it must start after 10:00:
+    slot_45 = scheduler.find_next_available_slot(duration_minutes=45, search_date=search_d)
+    assert slot_45 == datetime(2026, 10, 15, 10, 0)
+
+    # If entire operating window is booked (e.g. asking for 15 hours in a 12 hour day):
+    slot_none = scheduler.find_next_available_slot(duration_minutes=900, search_date=search_d)
+    assert slot_none is None
+
+
+def test_task_recurring_lifecycle(sample_pets):
+    """Verify DAILY, WEEKLY, and NONE recurrence behaviors and Pet.complete_task integration."""
+    pet, _ = sample_pets
+
+    # 1. Non-recurring task
+    t_none = Task(title="One-time Nail Trim", recurrence="NONE")
+    assert t_none.create_next_occurrence() is None
+
+    # 2. Daily recurring task
+    t_daily = Task(
+        title="Daily Walk",
+        duration_minutes=30,
+        priority="high",
+        recurrence="DAILY",
+        scheduled_datetime=datetime(2026, 10, 15, 8, 0),
+    )
+    pet.add_task(t_daily)
+    assert len(pet.tasks) == 1
+
+    next_daily = pet.complete_task(t_daily.task_id)
+    assert next_daily is not None
+    assert t_daily.is_completed is True
+    assert next_daily.is_completed is False
+    assert next_daily.scheduled_datetime == datetime(2026, 10, 16, 8, 0)
+    assert next_daily.title == "Daily Walk"
+    assert next_daily.priority == "high"
+    assert len(pet.tasks) == 2
+    assert len(pet.pending_tasks()) == 1
+
+    # 3. Weekly recurring task
+    t_weekly = Task(
+        title="Weekly Bath",
+        duration_minutes=45,
+        priority="medium",
+        recurrence="WEEKLY",
+        scheduled_datetime=datetime(2026, 10, 15, 10, 0),
+    )
+    pet.add_task(t_weekly)
+    next_weekly = pet.complete_task(t_weekly.task_id)
+    assert next_weekly is not None
+    assert t_weekly.is_completed is True
+    assert next_weekly.scheduled_datetime == datetime(2026, 10, 22, 10, 0)
+
+
+def test_scheduler_conflict_detection():
+    """Verify pairwise conflict detection, overlap minute calculation, and completion filtering."""
+    scheduler = Scheduler()
+    t1 = Task(title="Morning Walk", pet_name="Luna", duration_minutes=45, scheduled_time=time(8, 0))
+    t2 = Task(title="Medication & Feeding", pet_name="Mochi", duration_minutes=30, scheduled_time=time(8, 30))
+    t3 = Task(title="Afternoon Nap", pet_name="Luna", duration_minutes=60, scheduled_time=time(14, 0))
+
+    conflicts = scheduler.detect_conflicts([t1, t2, t3])
+    assert len(conflicts) == 1
+    conflict = conflicts[0]
+    assert conflict["task_1"] == t1
+    assert conflict["task_2"] == t2
+    assert conflict["overlap_minutes"] == 15
+    assert "[CONFLICT]" in conflict["warning_message"]
+    assert "Morning Walk" in conflict["warning_message"]
+    assert "Medication & Feeding" in conflict["warning_message"]
+    assert "by 15 mins" in conflict["warning_message"]
+
+    # Disregard completed tasks
+    t2.mark_complete()
+    conflicts_resolved = scheduler.detect_conflicts([t1, t2, t3])
+    assert len(conflicts_resolved) == 0

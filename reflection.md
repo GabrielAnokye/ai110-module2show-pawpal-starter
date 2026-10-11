@@ -70,8 +70,9 @@ Yes, The number of classes was reduced to 4
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+- **Algorithmic Choice (Interval-Based Overlap vs. Exact Match)**: We chose duration-aware interval overlap detection (`start_A < end_B and start_B < end_A`) over exact timestamp equality. Real-world pet care involves activities with non-zero durations (e.g., a 45-minute dog walk overlapping with a 30-minute vet check starting 15 minutes later). Exact timestamp matching would have falsely reported zero conflicts.
+- **Complexity & Mutation Tradeoff**: Sorting active tasks chronologically first unlocks an efficient $O(n \log n)$ pairwise check with early loop termination as soon as a candidate's start time surpasses the active task's end window. However, recurring task generation introduces state mutation tradeoffs: completing a task appends a new instance to `pet.tasks` for tomorrow or next week. We chose to mutate pet collections safely by keeping the original task marked `is_completed=True` for historical tracking rather than replacing in-place, ensuring UI auditability at the cost of slight list growth.
+- **AI Influence & Refinement**: The AI assistant initially suggested a simplistic check comparing string representations of start times (`task1.scheduled_time == task2.scheduled_time`). We rejected this as inadequate for realistic scheduling and steered the implementation toward duration-aware `datetime` windows calculated via `datetime.combine(date, time) + timedelta(minutes=duration)`. This captured true simultaneous care demands across different pets.
 
 ---
 

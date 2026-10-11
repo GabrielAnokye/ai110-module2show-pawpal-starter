@@ -7,7 +7,7 @@ Implements Owner, Pet, Task, and Scheduler classes.
 from dataclasses import dataclass, field
 import datetime as dt_module
 from datetime import date, datetime, time, timedelta
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 PRIORITY_WEIGHTS: dict[str, float] = {
@@ -39,6 +39,7 @@ class Task:
     scheduled_datetime: datetime | None = None
     pet_name: str = ""
     description: str = ""
+    recurrence: str = "NONE"  # "NONE" | "DAILY" | "WEEKLY"
     task_id: str = field(default_factory=lambda: uuid4().hex[:8])
 
     def __post_init__(self) -> None:
@@ -75,9 +76,53 @@ class Task:
             base += 5.0
         return base
 
-    def mark_complete(self) -> None:
-        """Flag this task as done for the day."""
+    def create_next_occurrence(self) -> Optional["Task"]:
+        """Create the next occurrence of a recurring task, or None if recurrence is NONE."""
+        rec = self.recurrence.upper()
+        if rec == "DAILY":
+            days = 1
+        elif rec == "WEEKLY":
+            days = 7
+        else:
+            return None
+
+        # Calculate next datetime
+        if self.scheduled_datetime is not None:
+            next_datetime = self.scheduled_datetime + timedelta(days=days)
+        elif isinstance(self.scheduled_time, datetime):
+            next_datetime = self.scheduled_time + timedelta(days=days)
+        else:
+            base_t = self.scheduled_time or self.preferred_time or time(8, 0)
+            next_datetime = datetime.combine(date.today() + timedelta(days=days), base_t)
+
+        # Calculate next scheduled_time
+        if isinstance(self.scheduled_time, datetime):
+            next_scheduled_time = self.scheduled_time + timedelta(days=days)
+        elif self.scheduled_time is not None:
+            next_scheduled_time = self.scheduled_time
+        else:
+            next_scheduled_time = next_datetime.time()
+
+        next_task = Task(
+            title=self.title,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            category=self.category,
+            preferred_time=self.preferred_time,
+            completed=False,
+            start_time=None,
+            scheduled_time=next_scheduled_time,
+            scheduled_datetime=next_datetime,
+            pet_name=self.pet_name,
+            description=self.description,
+            recurrence=self.recurrence,
+        )
+        return next_task
+
+    def mark_complete(self) -> Optional["Task"]:
+        """Flag this task as done for the day and return next occurrence if recurring."""
         self.completed = True
+        return self.create_next_occurrence()
 
     def mark_pending(self) -> None:
         """Flag this task as pending/not completed."""
@@ -142,6 +187,20 @@ class Pet:
         """Return the tasks that are not yet marked complete (alias for pending_tasks)."""
         return self.pending_tasks()
 
+    def complete_task(self, task_id: str | Any) -> Optional[Task]:
+        """Mark task complete, automatically instantiate and append next occurrence if recurring."""
+        target_id = task_id.task_id if hasattr(task_id, "task_id") else task_id
+        for t in self.tasks:
+            if t.task_id == target_id:
+                t.completed = True
+                next_t = t.create_next_occurrence()
+                if next_t is not None:
+                    if not next_t.pet_name:
+                        next_t.pet_name = self.name
+                    self.tasks.append(next_t)
+                return next_t
+        return None
+
 
 @dataclass
 class Owner:
@@ -197,6 +256,23 @@ class Scheduler:
     def add_task(self, task: Task) -> None:
         """Add a task directly to the scheduler."""
         self.tasks.append(task)
+
+    def complete_task(self, task_id: str | Any) -> Optional[Task]:
+        """Mark a task complete across owner's pets, appending next occurrence if recurring."""
+        target_id = task_id.task_id if hasattr(task_id, "task_id") else task_id
+        if self.owner is not None:
+            for pet in self.owner.pets:
+                for t in pet.tasks:
+                    if t.task_id == target_id:
+                        return pet.complete_task(target_id)
+        for t in self.tasks:
+            if t.task_id == target_id:
+                t.completed = True
+                next_t = t.create_next_occurrence()
+                if next_t is not None:
+                    self.tasks.append(next_t)
+                return next_t
+        return None
 
     def build_plan(self, owner: Owner | None = None, pets: list[Pet] | Pet | None = None) -> dict:
         """Build the day's plan across multiple pets (or a specified pet subset).
@@ -317,3 +393,162 @@ class Scheduler:
                 lines.append(f"  • {t.describe()}")
 
         return "\n".join(lines)
+
+    def _resolve_tasks(self, tasks: Optional[List[Task]] = None) -> List[Task]:
+        """Resolve tasks from argument, attached owner, or scheduler task list."""
+        if tasks is not None:
+            return list(tasks)
+        if self.owner is not None:
+            return self.owner.get_all_tasks(pending_only=False)
+        return list(self.tasks)
+
+    def sort_by_time(self, tasks: Optional[List[Task]] = None) -> List[Task]:
+        """Sort tasks chronologically by scheduled time, tie-breaking by priority weight."""
+        task_list = self._resolve_tasks(tasks)
+        return sorted(
+            task_list,
+            key=lambda t: (
+                t.scheduled_time or t.start_time or t.preferred_time or time(0, 0),
+                -t.weight(),
+            ),
+        )
+
+    def sort_by_priority(self, tasks: Optional[List[Task]] = None) -> List[Task]:
+        """Sort tasks by descending priority weight, tie-breaking by earliest scheduled time."""
+        task_list = self._resolve_tasks(tasks)
+        return sorted(
+            task_list,
+            key=lambda t: (
+                -t.weight(),
+                t.scheduled_time or t.start_time or t.preferred_time or time(23, 59, 59),
+            ),
+        )
+
+    def filter_tasks(
+        self,
+        pet_name: Optional[str] = None,
+        is_completed: Optional[bool] = None,
+        priority: Optional[str] = None,
+    ) -> List[Task]:
+        """Filter aggregated tasks across all pets by pet name, completion status, or priority tier."""
+        task_list = self.owner.get_all_tasks(pending_only=False) if self.owner else list(self.tasks)
+        filtered: List[Task] = []
+        for t in task_list:
+            if pet_name is not None and t.pet_name.lower() != pet_name.lower():
+                continue
+            if is_completed is not None and t.is_completed != is_completed:
+                continue
+            if priority is not None and t.priority.lower() != priority.lower():
+                continue
+            filtered.append(t)
+        return filtered
+
+    def find_next_available_slot(
+        self,
+        duration_minutes: int,
+        search_date: date,
+        work_day_start: time = time(8, 0),
+        work_day_end: time = time(20, 0),
+    ) -> Optional[datetime]:
+        """Find the earliest continuous free window of at least duration_minutes within operating hours."""
+        task_list = self.owner.get_all_tasks(pending_only=False) if self.owner else list(self.tasks)
+        day_start_dt = datetime.combine(search_date, work_day_start)
+        day_end_dt = datetime.combine(search_date, work_day_end)
+
+        busy_intervals: List[tuple[datetime, datetime]] = []
+        for t in task_list:
+            if t.scheduled_datetime is not None and t.scheduled_datetime.date() != search_date:
+                continue
+
+            task_time = t.scheduled_time or t.start_time or t.preferred_time
+            if task_time is None:
+                continue
+
+            t_start = datetime.combine(search_date, task_time)
+            t_end = t_start + timedelta(minutes=t.duration_minutes)
+
+            if t_end <= day_start_dt or t_start >= day_end_dt:
+                continue
+            busy_intervals.append((max(t_start, day_start_dt), min(t_end, day_end_dt)))
+
+        merged: List[tuple[datetime, datetime]] = []
+        for interval in sorted(busy_intervals, key=lambda x: x[0]):
+            if not merged:
+                merged.append(interval)
+            else:
+                prev_s, prev_e = merged[-1]
+                cur_s, cur_e = interval
+                if cur_s <= prev_e:
+                    merged[-1] = (prev_s, max(prev_e, cur_e))
+                else:
+                    merged.append(interval)
+
+        cursor = day_start_dt
+        for int_start, int_end in merged:
+            gap_minutes = (int_start - cursor).total_seconds() / 60
+            if gap_minutes >= duration_minutes:
+                return cursor
+            cursor = max(cursor, int_end)
+
+        if (day_end_dt - cursor).total_seconds() / 60 >= duration_minutes:
+            return cursor
+
+        return None
+
+    def detect_conflicts(
+        self, tasks: Optional[List[Task]] = None
+    ) -> List[Dict[str, Any]]:
+        """Detect all pairwise overlapping time windows among pending tasks across all pets."""
+        task_list = self._resolve_tasks(tasks)
+        pending = [t for t in task_list if not t.completed]
+
+        # Extract pending tasks with valid time windows
+        timed_tasks: List[tuple[Task, datetime, datetime]] = []
+        for t in pending:
+            if t.scheduled_datetime is not None:
+                start_dt = t.scheduled_datetime
+            elif t.scheduled_time is not None:
+                start_dt = datetime.combine(date.today(), t.scheduled_time)
+            elif t.start_time is not None:
+                start_dt = datetime.combine(date.today(), t.start_time)
+            elif t.preferred_time is not None:
+                start_dt = datetime.combine(date.today(), t.preferred_time)
+            else:
+                continue
+            end_dt = start_dt + timedelta(minutes=t.duration_minutes)
+            timed_tasks.append((t, start_dt, end_dt))
+
+        # Sort by start_time for efficient O(n log n) conflict detection
+        timed_tasks.sort(key=lambda item: item[1])
+
+        conflicts: List[Dict[str, Any]] = []
+        n = len(timed_tasks)
+        for i in range(n):
+            task_a, start_a, end_a = timed_tasks[i]
+            for j in range(i + 1, n):
+                task_b, start_b, end_b = timed_tasks[j]
+                if start_b >= end_a:
+                    break
+                if start_a < end_b and start_b < end_a:
+                    overlap_start = max(start_a, start_b)
+                    overlap_end = min(end_a, end_b)
+                    overlap_min = int((overlap_end - overlap_start).total_seconds() / 60)
+                    if overlap_min > 0:
+                        pet_a = task_a.pet_name or "All"
+                        pet_b = task_b.pet_name or "All"
+                        time_a = f"{start_a.strftime('%H:%M')} - {end_a.strftime('%H:%M')}"
+                        time_b = f"{start_b.strftime('%H:%M')} - {end_b.strftime('%H:%M')}"
+                        msg = (
+                            f"[CONFLICT] '{task_a.title}' ({pet_a}, {time_a}) overlaps with "
+                            f"'{task_b.title}' ({pet_b}, {time_b}) by {overlap_min} mins."
+                        )
+                        conflicts.append(
+                            {
+                                "task_1": task_a,
+                                "task_2": task_b,
+                                "overlap_minutes": overlap_min,
+                                "warning_message": msg,
+                            }
+                        )
+
+        return conflicts

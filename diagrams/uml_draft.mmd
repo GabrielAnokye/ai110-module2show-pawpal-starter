@@ -5,6 +5,7 @@ classDiagram
     class Owner {
         +str name
         +str email
+        +str contact
         +int available_minutes
         +time day_start
         +List~Pet~ pets
@@ -20,16 +21,20 @@ classDiagram
         +str breed
         +float age_years
         +str notes
+        +str pet_id
         +List~Task~ tasks
         +add_task(task: Task) None
         +remove_task(task_id: str) bool
         +update_task(task_id: str, fields: dict) Task
         +pending_tasks() List~Task~
+        +get_pending_tasks() List~Task~
+        +complete_task(task_id: str) Optional~Task~
     }
 
     class Task {
         +str task_id
         +str title
+        +str description
         +str category
         +int duration_minutes
         +str priority
@@ -37,20 +42,32 @@ classDiagram
         +bool completed
         +time start_time
         +time scheduled_time
+        +datetime scheduled_datetime
         +str pet_name
+        +str recurrence
         +weight() float
-        +mark_complete() None
+        +create_next_occurrence() Optional~Task~
+        +mark_complete() Optional~Task~
         +mark_pending() None
         +describe() str
     }
 
     class Scheduler {
         +str strategy
+        +Owner owner
+        +List~Task~ tasks
+        +add_task(task: Task) None
+        +complete_task(task_id: str) Optional~Task~
         +build_plan(owner: Owner, pets: Any) dict
         +sort_tasks(tasks: List~Task~) List~Task~
         +filter_by_time(tasks: List~Task~, budget: int) List~Task~
         +assign_times(tasks: List~Task~, day_start: time) List~Task~
         +get_daily_schedule(target: Any) List~Task~
+        +sort_by_time(tasks: Optional~List~Task~~) List~Task~
+        +sort_by_priority(tasks: Optional~List~Task~~) List~Task~
+        +filter_tasks(pet_name: Optional~str~, is_completed: Optional~bool~, priority: Optional~str~) List~Task~
+        +find_next_available_slot(duration_minutes: int, search_date: date, work_day_start: time, work_day_end: time) Optional~datetime~
+        +detect_conflicts(tasks: Optional~List~Task~~) List~Dict~
         +explain(plan: dict) str
     }
 
