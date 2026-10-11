@@ -127,37 +127,65 @@ Result of complete_task():
 
 ## 🧪 Testing PawPal+
 
-```bash
-# Run the full test suite:
-pytest
+### Test Execution
 
-# Run with coverage:
-pytest --cov
+Run the complete automated test suite with verbose reporting from the project root:
+
+```bash
+python -m pytest -v
 ```
 
-Sample test output:
+### Coverage Summary
+
+The test suite in [`tests/test_pawpal.py`](tests/test_pawpal.py) provides comprehensive unit and integration coverage across all core classes (`Task`, `Pet`, `Owner`, `Scheduler`), validating both primary workflows and critical boundary conditions:
+
+- **Task Lifecycle & Completion**: Verifies default `is_completed=False` initialization, bidirectional toggling via `mark_complete()` and `mark_pending()`, and string description generation.
+- **Multi-Attribute Sorting & Tie-Breaking**: Validates that `Scheduler.sort_by_time()` sorts chronologically with priority weighting (`CRITICAL` > `HIGH` > `MEDIUM` > `LOW`) as tie-breaker, and `Scheduler.sort_by_priority()` sorts by urgency with time tie-breaking.
+- **Multi-Criteria Filtering Engine**: Validates querying across all household pets by pet name, completion state, and priority tier, as well as gracefully returning empty lists `[]` when no tasks match.
+- **Automated Recurrence Engine**: Validates that completing a `DAILY` or `WEEKLY` task marks the original task complete (`is_completed=True`) and automatically spawns the next occurrence scheduled exactly 24 hours (`+ timedelta(days=1)`) or 7 days (`+ timedelta(days=7)`) forward.
+- **Month & Midnight Boundary Math**: Tests date math rollover across month transitions (e.g., Oct 31 to Nov 1) and cross-month weekly intervals.
+- **Interval Overlap Conflict Detection**: Validates mathematical interval intersection ($\text{start}_A < \text{end}_B \land \text{start}_B < \text{end}_A$), reporting exact overlapping minutes and detailed warning messages.
+- **Boundary & Edge Case Protection**:
+  - Confirms back-to-back adjacent commitments (`end_A == start_B`) trigger **zero** false-positive conflicts.
+  - Confirms completed tasks are disregarded during conflict analysis.
+  - Confirms owners with 0 pets or empty schedules execute `collect_all_tasks()`, `sort_by_time()`, and `detect_conflicts()` safely without raising exceptions.
+- **Time Budget Filtering & Slot Finding**: Tests `Scheduler.build_plan()` against constrained owner time limits, and verifies `Scheduler.find_next_available_slot()` on both empty and scheduled calendars.
+
+### Terminal Output
 
 ```text
+$ python -m pytest -v
 ============================== test session starts ==============================
-platform darwin -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0 -- venv/bin/python
+platform darwin -- Python 3.14.7, pytest-9.1.1, pluggy-1.6.0
 rootdir: /Users/gabrielanokye/AI Engineer/ai110-module2show-pawpal-starter
 configfile: pytest.ini
 testpaths: tests
-collected 10 items
+plugins: anyio-4.15.1
+collected 11 items
 
-tests/test_pawpal.py::test_task_completion_status PASSED                 [ 10%]
-tests/test_pawpal.py::test_pet_task_management PASSED                    [ 20%]
-tests/test_pawpal.py::test_owner_task_aggregation PASSED                 [ 30%]
-tests/test_pawpal.py::test_scheduler_daily_schedule_ordering PASSED      [ 40%]
-tests/test_pawpal.py::test_scheduler_build_plan_budget_filtering PASSED  [ 50%]
-tests/test_pawpal.py::test_scheduler_multi_attribute_sorting PASSED      [ 60%]
-tests/test_pawpal.py::test_scheduler_multi_criteria_filtering PASSED     [ 70%]
-tests/test_pawpal.py::test_scheduler_find_next_available_slot PASSED     [ 80%]
-tests/test_pawpal.py::test_task_recurring_lifecycle PASSED               [ 90%]
-tests/test_pawpal.py::test_scheduler_conflict_detection PASSED           [100%]
+tests/test_pawpal.py::test_task_lifecycle_and_completion PASSED          [  9%]
+tests/test_pawpal.py::test_sorting_chronological_and_priority PASSED     [ 18%]
+tests/test_pawpal.py::test_filter_tasks_by_multiple_criteria PASSED      [ 27%]
+tests/test_pawpal.py::test_daily_recurrence_generation PASSED            [ 36%]
+tests/test_pawpal.py::test_conflict_detection_overlapping_intervals PASSED [ 45%]
+tests/test_pawpal.py::test_conflict_detection_edge_cases PASSED          [ 54%]
+tests/test_pawpal.py::test_empty_owner_and_edge_conditions PASSED        [ 63%]
+tests/test_pawpal.py::test_pet_task_management_edge_cases PASSED         [ 72%]
+tests/test_pawpal.py::test_recurrence_across_month_boundary PASSED       [ 81%]
+tests/test_pawpal.py::test_scheduler_build_plan_budget_filtering PASSED  [ 90%]
+tests/test_pawpal.py::test_scheduler_find_next_available_slot PASSED     [100%]
 
-============================== 10 passed in 0.02s ==============================
+============================== 11 passed in 0.04s ==============================
 ```
+
+### System Reliability Confidence Level
+
+**Confidence Rating: ⭐⭐⭐⭐⭐ 5/5**
+
+**Why we have high confidence for real-world usage**:
+1. **Mathematical Interval Invariants**: Conflict detection is decoupled from simplistic timestamp equality. By verifying strict interval overlap math ($\text{start}_A < \text{end}_B \land \text{start}_B < \text{end}_A$), the scheduler guarantees that simultaneous demands (such as overlapping dog walks and vet visits) are flagged accurately, while back-to-back touching commitments remain conflict-free.
+2. **Defensive Recurrence Lifecycle**: Real-world pet care relies heavily on repeating habits (daily insulin, feeding, medications). Tests verify that recurrence math operates on explicit `datetime` increments across day and month boundaries without silent failures or drift. Furthermore, maintaining completed tasks in history while generating fresh pending occurrences guarantees schedule auditability without state loss.
+3. **Graceful Degradation Under Empty States**: Boundary testing ensures that empty user states (0 pets, empty task list, zero conflicts) return safe defaults (`[]` or `None`) without throwing unhandled exceptions.
 
 ## 📐 Smarter Scheduling
 

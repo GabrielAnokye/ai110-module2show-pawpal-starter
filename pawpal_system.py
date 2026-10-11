@@ -394,6 +394,10 @@ class Scheduler:
 
         return "\n".join(lines)
 
+    def collect_all_tasks(self) -> List[Task]:
+        """Aggregate all tasks across all pets for the attached owner or scheduler tasks."""
+        return self._resolve_tasks()
+
     def _resolve_tasks(self, tasks: Optional[List[Task]] = None) -> List[Task]:
         """Resolve tasks from argument, attached owner, or scheduler task list."""
         if tasks is not None:
