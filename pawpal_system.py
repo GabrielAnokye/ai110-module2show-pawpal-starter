@@ -5,8 +5,9 @@ Implements Owner, Pet, Task, and Scheduler classes.
 """
 
 from dataclasses import dataclass, field
+import datetime as dt_module
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, List, Optional
 from uuid import uuid4
 
 PRIORITY_WEIGHTS: dict[str, float] = {
@@ -27,18 +28,29 @@ def add_minutes_to_time(base_time: time, minutes: int) -> time:
 class Task:
     """A single unit of pet care: a walk, a feeding, a dose of medication, a vet visit."""
 
-    title: str
-    duration_minutes: int
+    title: str = ""
+    duration_minutes: int = 30
     priority: str = "medium"  # "low" | "medium" | "high" | "critical"
     category: str = "general"  # "walk" | "feeding" | "medication" | "appointment" | ...
     preferred_time: time | None = None
     completed: bool = False
     start_time: time | None = None  # assigned by Scheduler, not by the user
     scheduled_time: time | None = None  # chronological scheduled time
+    scheduled_datetime: datetime | None = None
     pet_name: str = ""
+    description: str = ""
     task_id: str = field(default_factory=lambda: uuid4().hex[:8])
 
     def __post_init__(self) -> None:
+        if not self.title and self.description:
+            self.title = self.description
+        elif not self.description and self.title:
+            self.description = self.title
+        if self.scheduled_datetime is not None:
+            if self.scheduled_time is None:
+                self.scheduled_time = self.scheduled_datetime.time()
+            if self.preferred_time is None:
+                self.preferred_time = self.scheduled_datetime.time()
         if self.scheduled_time is None and self.start_time is not None:
             self.scheduled_time = self.start_time
         elif self.start_time is None and self.scheduled_time is not None:
@@ -92,7 +104,12 @@ class Pet:
     breed: str = ""
     age_years: float = 0.0
     notes: str = ""
+    pet_id: str = ""
     tasks: list[Task] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.pet_id:
+            self.pet_id = f"pet_{uuid4().hex[:6]}"
 
     def add_task(self, task: Task) -> None:
         """Attach a new care task to this pet and associate the pet name."""
@@ -121,6 +138,10 @@ class Pet:
         """Return the tasks that are not yet marked complete."""
         return [t for t in self.tasks if not t.completed]
 
+    def get_pending_tasks(self) -> list[Task]:
+        """Return the tasks that are not yet marked complete (alias for pending_tasks)."""
+        return self.pending_tasks()
+
 
 @dataclass
 class Owner:
@@ -128,9 +149,16 @@ class Owner:
 
     name: str
     email: str = ""
+    contact: str = ""
     available_minutes: int = 120
     day_start: time = time(8, 0)
     pets: list[Pet] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.email and self.contact:
+            self.email = self.contact
+        elif not self.contact and self.email:
+            self.contact = self.email
 
     def add_pet(self, pet: Pet) -> None:
         """Register a pet under this owner."""
@@ -163,21 +191,26 @@ class Scheduler:
     """Turns tasks across multiple pets into a time-ordered daily plan."""
 
     strategy: str = "priority_first"
+    owner: Owner | None = None
     tasks: list[Task] = field(default_factory=list)
 
     def add_task(self, task: Task) -> None:
         """Add a task directly to the scheduler."""
         self.tasks.append(task)
 
-    def build_plan(self, owner: Owner, pets: list[Pet] | Pet | None = None) -> dict:
+    def build_plan(self, owner: Owner | None = None, pets: list[Pet] | Pet | None = None) -> dict:
         """Build the day's plan across multiple pets (or a specified pet subset).
 
         Returns a dict shaped like:
             {"scheduled": [Task, ...], "skipped": [Task, ...], "minutes_used": int}
         """
+        target_owner = owner or self.owner
+        if target_owner is None:
+            raise ValueError("No owner provided or attached to scheduler.")
+
         # Retrieve pending tasks
         if pets is None:
-            tasks = owner.get_all_tasks(pending_only=True)
+            tasks = target_owner.get_all_tasks(pending_only=True)
         elif isinstance(pets, Pet):
             tasks = pets.pending_tasks()
         else:
@@ -192,14 +225,14 @@ class Scheduler:
 
         # Filter and partition tasks based on available time budget
         for task in sorted_tasks:
-            if minutes_used + task.duration_minutes <= owner.available_minutes:
+            if minutes_used + task.duration_minutes <= target_owner.available_minutes:
                 scheduled.append(task)
                 minutes_used += task.duration_minutes
             else:
                 skipped.append(task)
 
-        # Assign back-to-back start times from owner.day_start
-        self.assign_times(scheduled, owner.day_start)
+        # Assign back-to-back start times from target_owner.day_start
+        self.assign_times(scheduled, target_owner.day_start)
 
         return {
             "scheduled": scheduled,
@@ -252,9 +285,12 @@ class Scheduler:
             task_list = []
 
         # Ensure each task has a scheduled_time if start_time or preferred_time exists
+        base_start = target.day_start if isinstance(target, Owner) else (self.owner.day_start if self.owner else time(8, 0))
+        cur_t = base_start
         for t in task_list:
             if t.scheduled_time is None:
-                t.scheduled_time = t.start_time or t.preferred_time
+                t.scheduled_time = t.start_time or t.preferred_time or cur_t
+                cur_t = add_minutes_to_time(cur_t, t.duration_minutes)
 
         return sorted(task_list, key=lambda t: t.scheduled_time or time(0, 0))
 
