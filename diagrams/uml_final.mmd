@@ -1,0 +1,96 @@
+classDiagram
+    %% PawPal+ — Final Production Object-Oriented Domain Model & Architecture
+    %% Generated for diagrams/uml_final.mmd
+
+    class TaskPriority {
+        <<enumeration>>
+        LOW
+        MEDIUM
+        HIGH
+        CRITICAL
+    }
+
+    class TaskStatus {
+        <<enumeration>>
+        PENDING
+        COMPLETED
+    }
+
+    class Owner {
+        +name : str
+        +email : str
+        +contact : str
+        +available_minutes : int
+        +day_start : time
+        +pets : List~Pet~
+        +add_pet(pet : Pet) : void
+        +remove_pet(pet_name : str) : bool
+        +get_pet(pet_name : str) : Pet
+        +get_all_tasks(pending_only : bool) : List~Task~
+    }
+
+    class Pet {
+        +name : str
+        +species : str
+        +breed : str
+        +age_years : float
+        +notes : str
+        +pet_id : str
+        +tasks : List~Task~
+        +add_task(task : Task) : void
+        +remove_task(task_id : str) : bool
+        +update_task(task_id : str, fields : dict) : Task
+        +pending_tasks() : List~Task~
+        +get_pending_tasks() : List~Task~
+        +complete_task(task_id : str) : Optional~Task~
+    }
+
+    class Task {
+        +task_id : str
+        +title : str
+        +description : str
+        +category : str
+        +duration_minutes : int
+        +priority : str
+        +preferred_time : Optional~time~
+        +completed : bool
+        +is_completed : bool
+        +start_time : Optional~time~
+        +scheduled_time : Optional~time~
+        +scheduled_datetime : Optional~datetime~
+        +pet_name : str
+        +recurrence : str
+        +weight() : float
+        +create_next_occurrence() : Optional~Task~
+        +mark_complete() : Optional~Task~
+        +mark_pending() : void
+        +describe() : str
+    }
+
+    class Scheduler {
+        +strategy : str
+        +owner : Optional~Owner~
+        +tasks : List~Task~
+        +add_task(task : Task) : void
+        +complete_task(task_id : str) : Optional~Task~
+        +build_plan(owner : Optional~Owner~, pets : Any) : dict
+        +sort_tasks(tasks : List~Task~) : List~Task~
+        +filter_by_time(tasks : List~Task~, budget : int) : List~Task~
+        +assign_times(tasks : List~Task~, day_start : time) : List~Task~
+        +get_daily_schedule(target : Any) : List~Task~
+        +collect_all_tasks() : List~Task~
+        +sort_by_time(tasks : List~Task~) : List~Task~
+        +sort_by_priority(tasks : List~Task~) : List~Task~
+        +filter_tasks(pet_name : str, is_completed : bool, priority : str) : List~Task~
+        +find_next_available_slot(duration_minutes : int, search_date : date) : Optional~datetime~
+        +detect_conflicts(tasks : List~Task~) : List~dict~
+        +explain(plan : dict) : str
+    }
+
+    %% Relationships and Cardinalities
+    Owner "1" *-- "0..*" Pet : owns
+    Pet "1" *-- "0..*" Task : assigned to
+    Scheduler o-- "0..1" Owner : manages
+    Scheduler ..> Task : processes / sorts
+    Task ..> TaskPriority : categorized by
+    Task ..> TaskStatus : tracks state with

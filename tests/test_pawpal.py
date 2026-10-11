@@ -386,3 +386,30 @@ def test_scheduler_find_next_available_slot(sample_owner: Owner, scheduler: Sche
     sched_empty = Scheduler(owner=empty_owner)
     slot_empty = sched_empty.find_next_available_slot(duration_minutes=45, search_date=search_d)
     assert slot_empty == datetime(2026, 10, 20, 8, 0), "Empty schedule should suggest day_start"
+
+
+def test_persistence_json_serialization(tmp_path, sample_owner: Owner):
+    """Verify JSON persistence layer: to_dict, from_dict, save_to_json, and load_from_json."""
+    file_path = tmp_path / "owner_data.json"
+
+    # Save owner with 2 pets and preconfigured tasks to JSON
+    sample_owner.save_to_json(str(file_path))
+    assert file_path.exists(), "JSON file should be created"
+
+    # Load owner from JSON
+    loaded_owner = Owner.load_from_json(str(file_path))
+
+    # Assert structural integrity and data equality
+    assert loaded_owner.name == sample_owner.name
+    assert loaded_owner.contact == sample_owner.contact
+    assert loaded_owner.available_minutes == sample_owner.available_minutes
+    assert loaded_owner.day_start == sample_owner.day_start
+    assert len(loaded_owner.pets) == len(sample_owner.pets)
+
+    # Check pet tasks round-trip fidelity
+    orig_tasks = sample_owner.get_all_tasks(pending_only=False)
+    loaded_tasks = loaded_owner.get_all_tasks(pending_only=False)
+    assert len(loaded_tasks) == len(orig_tasks)
+    assert [t.title for t in loaded_tasks] == [t.title for t in orig_tasks]
+    assert [t.priority for t in loaded_tasks] == [t.priority for t in orig_tasks]
+

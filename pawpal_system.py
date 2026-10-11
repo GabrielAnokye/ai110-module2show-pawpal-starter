@@ -139,6 +139,48 @@ class Task:
             f"({self.duration_minutes} min){time_str}{status}"
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize Task to a dictionary for JSON persistence."""
+        return {
+            "task_id": self.task_id,
+            "title": self.title,
+            "description": self.description,
+            "duration_minutes": self.duration_minutes,
+            "priority": self.priority,
+            "category": self.category,
+            "preferred_time": self.preferred_time.isoformat() if self.preferred_time else None,
+            "completed": self.completed,
+            "start_time": self.start_time.isoformat() if self.start_time else None,
+            "scheduled_time": self.scheduled_time.isoformat() if self.scheduled_time else None,
+            "scheduled_datetime": self.scheduled_datetime.isoformat() if self.scheduled_datetime else None,
+            "pet_name": self.pet_name,
+            "recurrence": self.recurrence,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Task":
+        """Deserialize a Task from a dictionary."""
+        pref_t = time.fromisoformat(data["preferred_time"]) if data.get("preferred_time") else None
+        s_t = time.fromisoformat(data["start_time"]) if data.get("start_time") else None
+        sch_t = time.fromisoformat(data["scheduled_time"]) if data.get("scheduled_time") else None
+        sch_dt = datetime.fromisoformat(data["scheduled_datetime"]) if data.get("scheduled_datetime") else None
+        return cls(
+            task_id=data.get("task_id", uuid4().hex[:8]),
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            duration_minutes=int(data.get("duration_minutes", 30)),
+            priority=data.get("priority", "medium"),
+            category=data.get("category", "general"),
+            preferred_time=pref_t,
+            completed=bool(data.get("completed", False)),
+            start_time=s_t,
+            scheduled_time=sch_t,
+            scheduled_datetime=sch_dt,
+            pet_name=data.get("pet_name", ""),
+            recurrence=data.get("recurrence", "NONE"),
+        )
+
+
 
 @dataclass
 class Pet:
@@ -201,6 +243,33 @@ class Pet:
                 return next_t
         return None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize Pet to a dictionary for JSON persistence."""
+        return {
+            "pet_id": self.pet_id,
+            "name": self.name,
+            "species": self.species,
+            "breed": self.breed,
+            "age_years": self.age_years,
+            "notes": self.notes,
+            "tasks": [t.to_dict() for t in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Pet":
+        """Deserialize Pet from a dictionary."""
+        pet = cls(
+            pet_id=data.get("pet_id", ""),
+            name=data.get("name", ""),
+            species=data.get("species", "Other"),
+            breed=data.get("breed", ""),
+            age_years=float(data.get("age_years", 0.0)),
+            notes=data.get("notes", ""),
+        )
+        for t_dict in data.get("tasks", []):
+            pet.add_task(Task.from_dict(t_dict))
+        return pet
+
 
 @dataclass
 class Owner:
@@ -243,6 +312,45 @@ class Owner:
             tasks = pet.pending_tasks() if pending_only else pet.tasks
             all_tasks.extend(tasks)
         return all_tasks
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize Owner profile and all pet commitments to a dictionary."""
+        return {
+            "name": self.name,
+            "email": self.email,
+            "contact": self.contact,
+            "available_minutes": self.available_minutes,
+            "day_start": self.day_start.isoformat(),
+            "pets": [p.to_dict() for p in self.pets],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Owner":
+        """Deserialize Owner from a dictionary."""
+        owner = cls(
+            name=data.get("name", ""),
+            email=data.get("email", ""),
+            contact=data.get("contact", ""),
+            available_minutes=int(data.get("available_minutes", 120)),
+            day_start=time.fromisoformat(data["day_start"]) if data.get("day_start") else time(8, 0),
+        )
+        for p_dict in data.get("pets", []):
+            owner.add_pet(Pet.from_dict(p_dict))
+        return owner
+
+    def save_to_json(self, filepath: str) -> None:
+        """Serialize owner profile and all pet commitments to a JSON file."""
+        import json
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load_from_json(cls, filepath: str) -> "Owner":
+        """Load owner profile and all pet commitments from a JSON file."""
+        import json
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls.from_dict(data)
 
 
 @dataclass

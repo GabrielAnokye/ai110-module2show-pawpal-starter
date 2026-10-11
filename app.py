@@ -1,12 +1,16 @@
 """PawPal+ Pet Care Streamlit Application.
 
 Integrates the core OOP backend models (Owner, Pet, Task, Scheduler)
-with an interactive, modern dashboard UI.
+with an interactive, modern dashboard UI exposing Phase 4 algorithmic capabilities:
+- Interval overlap conflict detection banner
+- Interactive multi-criteria filter & multi-attribute sorting bar
+- Automated recurring task completion & forward scheduling
+- Smart continuous slot recommender widget
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 import streamlit as st
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import Owner, Pet, Scheduler, Task, add_minutes_to_time
 
 # -----------------------------------------------------------------------------
 # 1. Page Configuration & Custom CSS
@@ -62,6 +66,14 @@ st.markdown(
         margin-bottom: 0.75rem;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
+
+    .conflict-card {
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        margin-bottom: 0.5rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -75,7 +87,7 @@ if "owner" not in st.session_state:
     owner = Owner(
         name="Alex Carter",
         contact="alex@example.com",
-        available_minutes=120,
+        available_minutes=180,
         day_start=time(8, 0),
     )
 
@@ -83,58 +95,72 @@ if "owner" not in st.session_state:
     luna = Pet(name="Luna", species="Dog", breed="Golden Retriever", age_years=3.0, pet_id="pet_1")
     mochi = Pet(name="Mochi", species="Cat", breed="Siamese Cat", age_years=2.0, pet_id="pet_2")
 
-    # Attach initial sample care tasks
-    luna.add_task(
-        Task(
-            title="Morning Park Walk",
-            description="Morning Park Walk",
-            duration_minutes=30,
-            priority="high",
-            category="walk",
-            preferred_time=time(8, 30),
-            scheduled_time=time(8, 30),
-        )
+    today = date.today()
+
+    # Attach initial sample care tasks with intentional real-world scenario
+    # Luna's walk (09:00 - 09:45)
+    t_walk = Task(
+        title="Morning Park Walk",
+        description="Morning Park Walk",
+        duration_minutes=45,
+        priority="high",
+        category="walk",
+        preferred_time=time(9, 0),
+        scheduled_time=time(9, 0),
+        scheduled_datetime=datetime.combine(today, time(9, 0)),
+        recurrence="NONE",
     )
-    luna.add_task(
-        Task(
-            title="Breakfast & Supplements",
-            description="Breakfast & Supplements",
-            duration_minutes=15,
-            priority="high",
-            category="feeding",
-            preferred_time=time(8, 0),
-            scheduled_time=time(8, 0),
-        )
+    # Luna's breakfast (08:00 - 08:15) - DAILY recurrence
+    t_breakfast = Task(
+        title="Daily Breakfast & Supplements",
+        description="Daily Breakfast & Supplements",
+        duration_minutes=15,
+        priority="high",
+        category="feeding",
+        preferred_time=time(8, 0),
+        scheduled_time=time(8, 0),
+        scheduled_datetime=datetime.combine(today, time(8, 0)),
+        recurrence="DAILY",
     )
-    mochi.add_task(
-        Task(
-            title="Daily Insulin Dose",
-            description="Daily Insulin Dose",
-            duration_minutes=10,
-            priority="critical",
-            category="medication",
-            preferred_time=time(8, 15),
-            scheduled_time=time(8, 15),
-        )
+    # Mochi's vet visit (09:15 - 09:45) - Intentionally overlaps with Luna's walk to demo conflict detector!
+    t_vet = Task(
+        title="Vet Check & Vaccine",
+        description="Vet Check & Vaccine",
+        duration_minutes=30,
+        priority="high",
+        category="appointment",
+        preferred_time=time(9, 15),
+        scheduled_time=time(9, 15),
+        scheduled_datetime=datetime.combine(today, time(9, 15)),
+        recurrence="NONE",
     )
-    mochi.add_task(
-        Task(
-            title="Coat Brushing & Grooming",
-            description="Coat Brushing & Grooming",
-            duration_minutes=20,
-            priority="medium",
-            category="grooming",
-            preferred_time=time(10, 0),
-            scheduled_time=time(10, 0),
-        )
+    # Mochi's insulin dose (08:15 - 08:30) - DAILY recurrence
+    t_insulin = Task(
+        title="Daily Insulin Dose",
+        description="Daily Insulin Dose",
+        duration_minutes=15,
+        priority="critical",
+        category="medication",
+        preferred_time=time(8, 15),
+        scheduled_time=time(8, 15),
+        scheduled_datetime=datetime.combine(today, time(8, 15)),
+        recurrence="DAILY",
     )
+
+    luna.add_task(t_walk)
+    luna.add_task(t_breakfast)
+    mochi.add_task(t_vet)
+    mochi.add_task(t_insulin)
 
     owner.add_pet(luna)
     owner.add_pet(mochi)
     st.session_state.owner = owner
 
-if "scheduler" not in st.session_state:
+# Defensive check: ensure scheduler is fresh and linked to owner
+if "scheduler" not in st.session_state or not hasattr(st.session_state.scheduler, "detect_conflicts"):
     st.session_state.scheduler = Scheduler(owner=st.session_state.owner)
+else:
+    st.session_state.scheduler.owner = st.session_state.owner
 
 owner_obj: Owner = st.session_state.owner
 
@@ -175,7 +201,7 @@ with st.sidebar:
     st.session_state.scheduler.strategy = strategy
 
     st.divider()
-    if st.button("🔄 Reset to Default Sample Data"):
+    if st.button("🔄 Reset to Default Scenario Data"):
         del st.session_state["owner"]
         del st.session_state["scheduler"]
         st.rerun()
@@ -223,7 +249,7 @@ with header_col2:
 
 st.divider()
 
-# Requirement 3: Metrics Row (Total Pets, Total Tasks, Pending Tasks, Completed Tasks)
+# Metrics Row (Total Pets, Total Tasks, Pending Tasks, Completed Tasks)
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("🐾 Total Pets", f"{total_pets}")
 m2.metric("📋 Total Tasks", f"{len(all_tasks)}")
@@ -238,10 +264,10 @@ tab_dashboard, tab_manage = st.tabs(
 )
 
 # -----------------------------------------------------------------------------
-# Tab 1: Daily Schedule & Dashboard (Requirement 1 & 2)
+# Tab 1: Daily Schedule & Dashboard
 # -----------------------------------------------------------------------------
 with tab_dashboard:
-    # Requirement 1: Pet Overview Section
+    # Pet Overview Section
     st.subheader("🐾 Active Pets")
     if not owner_obj.pets:
         st.info("No pets registered yet. Go to the 'Add / Manage' tab to add your first pet.")
@@ -274,80 +300,221 @@ with tab_dashboard:
 
     st.divider()
 
-    # Requirement 2: Schedule Table & Interactive Completion
-    st.subheader("🗓️ Today's Schedule")
+    # -------------------------------------------------------------------------
+    # Requirement 1: Conflict Detection Banner
+    # -------------------------------------------------------------------------
+    st.subheader("🗓️ Today's Schedule & Conflicts")
 
-    # Conflict Detection Alert
     detected_conflicts = st.session_state.scheduler.detect_conflicts()
     if detected_conflicts:
-        with st.container():
-            st.warning(f"⚠️ **{len(detected_conflicts)} Schedule Conflict(s) Detected:**")
-            for conf in detected_conflicts:
-                st.caption(f"• {conf['warning_message']}")
+        with st.container(border=True):
+            st.warning(f"⚠️ **{len(detected_conflicts)} Active Scheduling Conflict(s) Detected Across Pets!**")
+            for idx, conf in enumerate(detected_conflicts, 1):
+                t1 = conf["task_1"]
+                t2 = conf["task_2"]
+                t1_end = add_minutes_to_time(t1.scheduled_time, t1.duration_minutes) if t1.scheduled_time else None
+                t2_end = add_minutes_to_time(t2.scheduled_time, t2.duration_minutes) if t2.scheduled_time else None
+                t1_win = f"{t1.scheduled_time.strftime('%H:%M')} – {t1_end.strftime('%H:%M')}" if (t1.scheduled_time and t1_end) else "TBD"
+                t2_win = f"{t2.scheduled_time.strftime('%H:%M')} – {t2_end.strftime('%H:%M')}" if (t2.scheduled_time and t2_end) else "TBD"
+                
+                st.markdown(
+                    f"""
+                    <div class="conflict-card">
+                        <strong>🚨 Conflict #{idx}:</strong> Simultaneous time window overlap!<br/>
+                        • 🐾 <strong>{t1.pet_name}</strong>: <em>{t1.title}</em> (<code>{t1_win}</code>, {t1.duration_minutes} min)<br/>
+                        • 🐾 <strong>{t2.pet_name}</strong>: <em>{t2.title}</em> (<code>{t2_win}</code>, {t2.duration_minutes} min)<br/>
+                        ↳ <strong>Overlap Window:</strong> <span style="color:#ef4444; font-weight:700;">{conf['overlap_minutes']} minutes simultaneous demand</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+    else:
+        st.success("✨ **No scheduling conflicts detected.** All active pet commitments have clean, non-overlapping windows.")
 
-    daily_schedule = st.session_state.scheduler.get_daily_schedule(st.session_state.owner)
+    # -------------------------------------------------------------------------
+    # Requirement 2: Interactive Sorting & Filter Bar
+    # -------------------------------------------------------------------------
+    with st.container(border=True):
+        st.markdown("##### 🎛️ Filter & Sort Schedule")
+        f_col1, f_col2, f_col3, f_col4 = st.columns([1.5, 1.2, 1.2, 2.1])
 
-    if not daily_schedule:
-        st.info("No tasks scheduled yet. Add tasks in the 'Add / Manage' tab.")
+        with f_col1:
+            pet_choices = ["All Pets"] + [p.name for p in owner_obj.pets]
+            selected_pet_filter = st.selectbox("🐾 Pet Filter", pet_choices, index=0)
+
+        with f_col2:
+            status_filter = st.selectbox("📌 Status Filter", ["All", "Pending", "Completed"], index=0)
+
+        with f_col3:
+            priority_filter = st.selectbox("🚨 Priority Filter", ["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"], index=0)
+
+        with f_col4:
+            sort_mode = st.radio(
+                "🔀 Sorting Mode",
+                ["Chronological (Time)", "Priority Tier"],
+                horizontal=True,
+            )
+
+    # Connect filter controls to Scheduler backend methods
+    pet_arg = None if selected_pet_filter == "All Pets" else selected_pet_filter
+    status_arg = None
+    if status_filter == "Pending":
+        status_arg = False
+    elif status_filter == "Completed":
+        status_arg = True
+    prio_arg = None if priority_filter == "All" else priority_filter.lower()
+
+    # Step A: Multi-criteria filtering
+    filtered_tasks = st.session_state.scheduler.filter_tasks(
+        pet_name=pet_arg,
+        is_completed=status_arg,
+        priority=prio_arg,
+    )
+
+    # Step B: Multi-attribute sorting
+    if sort_mode == "Chronological (Time)":
+        display_tasks = st.session_state.scheduler.sort_by_time(filtered_tasks)
+    else:
+        display_tasks = st.session_state.scheduler.sort_by_priority(filtered_tasks)
+
+    # -------------------------------------------------------------------------
+    # Schedule Table & Interactive Completion
+    # -------------------------------------------------------------------------
+    if not display_tasks:
+        st.info("No tasks match the active filter criteria. Try adjusting the filter bar above.")
     else:
         st.caption(
-            f"Showing {len(daily_schedule)} tasks strictly ordered chronologically by scheduled time across all pets."
+            f"Displaying **{len(display_tasks)} tasks** sorted by **{sort_mode}** "
+            f"(Pet: `{selected_pet_filter}`, Status: `{status_filter}`, Priority: `{priority_filter}`)."
         )
 
-        # Header row
-        t_header = st.columns([1.2, 1.2, 2.8, 1.2, 1.2, 1.2, 1.2])
-        t_header[0].markdown("**Time**")
-        t_header[1].markdown("**Pet**")
-        t_header[2].markdown("**Description**")
-        t_header[3].markdown("**Duration**")
-        t_header[4].markdown("**Priority**")
-        t_header[5].markdown("**Status**")
-        t_header[6].markdown("**Action**")
+        with st.container(border=True):
+            # Table Header
+            t_header = st.columns([1.1, 1.1, 2.6, 1.0, 1.1, 1.1, 1.0, 1.0])
+            t_header[0].markdown("**Time**")
+            t_header[1].markdown("**Pet**")
+            t_header[2].markdown("**Description**")
+            t_header[3].markdown("**Duration**")
+            t_header[4].markdown("**Priority**")
+            t_header[5].markdown("**Recur**")
+            t_header[6].markdown("**Status**")
+            t_header[7].markdown("**Action**")
 
-        st.markdown("<hr style='margin:0.2rem 0 0.6rem 0;'/>", unsafe_allow_html=True)
+            st.markdown("<hr style='margin:0.2rem 0 0.6rem 0;'/>", unsafe_allow_html=True)
 
-        priority_labels = {
-            "critical": "🔴 Critical",
-            "high": "🟠 High",
-            "medium": "🟡 Medium",
-            "low": "🟢 Low",
-        }
+            priority_labels = {
+                "critical": "🔴 Critical",
+                "high": "🟠 High",
+                "medium": "🟡 Medium",
+                "low": "🟢 Low",
+            }
 
-        for task in daily_schedule:
-            t_row = st.columns([1.2, 1.2, 2.8, 1.2, 1.2, 1.2, 1.2])
+            recurrence_badges = {
+                "DAILY": "🔄 Daily",
+                "WEEKLY": "🗓️ Weekly",
+                "NONE": "—",
+            }
 
-            effective_time = task.scheduled_time or task.start_time or task.preferred_time
-            time_display = effective_time.strftime("%H:%M") if effective_time else "TBD"
-            prio_display = priority_labels.get(task.priority.lower(), task.priority.upper())
-            status_display = "✅ Done" if task.completed else "⏳ Pending"
-            task_desc = task.description or task.title
+            for task in display_tasks:
+                t_row = st.columns([1.1, 1.1, 2.6, 1.0, 1.1, 1.1, 1.0, 1.0])
 
-            t_row[0].write(f"🕒 **{time_display}**")
-            t_row[1].write(task.pet_name or "All")
+                effective_time = task.scheduled_time or task.start_time or task.preferred_time
+                time_display = effective_time.strftime("%H:%M") if effective_time else "TBD"
+                prio_display = priority_labels.get(task.priority.lower(), task.priority.upper())
+                recur_display = recurrence_badges.get(task.recurrence.upper(), task.recurrence)
+                status_display = "🟢 Done" if task.completed else "⏳ Pending"
+                task_desc = task.description or task.title
 
-            if task.completed:
-                t_row[2].markdown(f"~~{task_desc}~~")
-            else:
-                t_row[2].write(task_desc)
+                t_row[0].write(f"🕒 **{time_display}**")
+                t_row[1].write(f"🐾 {task.pet_name or 'All'}")
 
-            t_row[3].write(f"{task.duration_minutes} min")
-            t_row[4].write(prio_display)
-            t_row[5].write(status_display)
-
-            with t_row[6]:
                 if task.completed:
-                    if st.button("Undo", key=f"btn_undo_{task.task_id}", help="Revert to pending"):
-                        task.mark_pending()
-                        st.rerun()
+                    t_row[2].markdown(f"~~{task_desc}~~")
                 else:
-                    if st.button(
-                        "Done",
-                        key=f"btn_done_{task.task_id}",
-                        type="primary",
-                        help="Mark task complete",
-                    ):
-                        st.session_state.scheduler.complete_task(task.task_id)
-                        st.rerun()
+                    t_row[2].write(task_desc)
+
+                t_row[3].write(f"{task.duration_minutes} min")
+                t_row[4].write(prio_display)
+                t_row[5].write(recur_display)
+                t_row[6].write(status_display)
+
+                with t_row[7]:
+                    # -------------------------------------------------------------
+                    # Requirement 3: Task Completion & Recurrence Handling
+                    # -------------------------------------------------------------
+                    if task.completed:
+                        if st.button("Undo", key=f"btn_undo_{task.task_id}", help="Revert to pending"):
+                            task.mark_pending()
+                            st.toast(f"Reverted '{task.title}' to pending status.", icon="↩️")
+                            st.rerun()
+                    else:
+                        if st.button(
+                            "Done",
+                            key=f"btn_done_{task.task_id}",
+                            type="primary",
+                            help="Mark task complete and spawn next occurrence if recurring",
+                        ):
+                            is_recurring = task.recurrence in ["DAILY", "WEEKLY"]
+                            spawned_task = st.session_state.scheduler.complete_task(task.task_id)
+                            if is_recurring and spawned_task:
+                                next_time_str = (
+                                    spawned_task.scheduled_datetime.strftime("%a %b %d at %H:%M")
+                                    if spawned_task.scheduled_datetime
+                                    else "tomorrow"
+                                )
+                                st.toast(
+                                    f"Task '{task.title}' completed! Automatically scheduled next occurrence for {next_time_str}.",
+                                    icon="🔄",
+                                )
+                            else:
+                                st.toast(f"Marked '{task.title}' as complete!", icon="✅")
+                            st.rerun()
+
+    # -------------------------------------------------------------------------
+    # Requirement 4: "Smart Slot Recommender" Widget (Bonus Feature)
+    # -------------------------------------------------------------------------
+    with st.expander("🔍 Find Next Open Care Slot", expanded=False):
+        st.markdown(
+            "Let the algorithmic engine scan existing commitments across all pets and find the earliest uninterrupted opening in your daily schedule."
+        )
+        slot_c1, slot_c2, slot_c3 = st.columns([1.5, 1.5, 1.0])
+        with slot_c1:
+            req_slot_dur = st.slider(
+                "Required Window Duration (minutes)", min_value=15, max_value=120, value=45, step=15
+            )
+        with slot_c2:
+            target_search_date = st.date_input(
+                "Target Date", value=date.today(), min_value=date.today()
+            )
+        with slot_c3:
+            st.write("")
+            st.write("")
+            scan_slot_btn = st.button("🔎 Scan Open Slot", use_container_width=True, type="primary")
+
+        if scan_slot_btn:
+            open_slot = st.session_state.scheduler.find_next_available_slot(
+                duration_minutes=req_slot_dur,
+                search_date=target_search_date,
+            )
+            if open_slot:
+                slot_end_dt = open_slot + timedelta(minutes=req_slot_dur)
+                st.success(f"✨ **Found Open Window on {target_search_date.strftime('%A, %b %d, %Y')}!**")
+                m_c1, m_c2, m_c3 = st.columns(3)
+                with m_c1:
+                    m_c1.metric("Suggested Start", open_slot.strftime("%I:%M %p"))
+                with m_c2:
+                    m_c2.metric("Suggested End", slot_end_dt.strftime("%I:%M %p"))
+                with m_c3:
+                    m_c3.metric("Free Window", f"{req_slot_dur} minutes continuous")
+                st.info(
+                    f"💡 No conflicts detected! You can safely schedule a {req_slot_dur}-minute session starting at "
+                    f"**{open_slot.strftime('%H:%M')}**."
+                )
+            else:
+                st.warning(
+                    f"⚠️ No continuous {req_slot_dur}-minute opening found on "
+                    f"{target_search_date.strftime('%b %d, %Y')} during operating hours ({owner_obj.day_start.strftime('%H:%M')} – 20:00)."
+                )
 
     # Algorithmic Budget Breakdown Expander
     with st.expander("⚡ Algorithmic Day Optimization (Time Budget & Explanation)", expanded=False):
