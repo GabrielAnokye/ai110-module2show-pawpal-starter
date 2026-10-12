@@ -7,21 +7,121 @@ Implements Owner, Pet, Task, and Scheduler classes.
 from dataclasses import dataclass, field
 import datetime as dt_module
 from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional
+import json
+import os
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
-PRIORITY_WEIGHTS: dict[str, float] = {
-    "critical": 40.0,
-    "high": 30.0,
-    "medium": 20.0,
-    "low": 10.0,
-}
+class _PriorityWeightsDict(dict):
+    """Dictionary supporting case-insensitive lookup and CRITICAL fallback."""
+
+    def __getitem__(self, key: Any) -> int:
+        if isinstance(key, str):
+            k = key.upper()
+            if k == "CRITICAL":
+                return 4
+            if k in self:
+                return super().__getitem__(k)
+        return super().__getitem__(key)
+
+    def get(self, key: Any, default: Any = 2) -> Any:
+        if isinstance(key, str):
+            k = key.upper()
+            if k == "CRITICAL":
+                return 4
+            if k in self:
+                return super().get(k, default)
+        return super().get(key, default)
+
+
+PRIORITY_WEIGHTS: dict[str, int] = _PriorityWeightsDict({
+    "HIGH": 3,
+    "MEDIUM": 2,
+    "LOW": 1,
+})
+
+
+def _task_effective_time(t: Any) -> time:
+    """Extract a normalized datetime.time for chronological sorting."""
+    sched = getattr(t, "scheduled_time", None)
+    if isinstance(sched, datetime):
+        return sched.time()
+    if isinstance(sched, time):
+        return sched
+    s_dt = getattr(t, "scheduled_datetime", None)
+    if isinstance(s_dt, datetime):
+        return s_dt.time()
+    start_t = getattr(t, "start_time", None)
+    if isinstance(start_t, datetime):
+        return start_t.time()
+    if isinstance(start_t, time):
+        return start_t
+    pref_t = getattr(t, "preferred_time", None)
+    if isinstance(pref_t, datetime):
+        return pref_t.time()
+    if isinstance(pref_t, time):
+        return pref_t
+    return time(23, 59, 59)
 
 
 def add_minutes_to_time(base_time: time, minutes: int) -> time:
     """Helper to add minutes to a standard datetime.time object."""
     dt = datetime.combine(date.today(), base_time) + timedelta(minutes=minutes)
     return dt.time()
+
+
+def _parse_time(val: Any) -> Optional[time]:
+    """Parse time from an ISO string, time object, or datetime object."""
+    if val is None:
+        return None
+    if isinstance(val, time):
+        return val
+    if isinstance(val, datetime):
+        return val.time()
+    val_str = str(val).strip()
+    if not val_str:
+        return None
+    try:
+        if "T" in val_str:
+            return datetime.fromisoformat(val_str).time()
+        return time.fromisoformat(val_str)
+    except Exception:
+        return None
+
+
+def _parse_datetime(val: Any) -> Optional[datetime]:
+    """Parse datetime from an ISO string or datetime object."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    val_str = str(val).strip()
+    if not val_str:
+        return None
+    try:
+        return datetime.fromisoformat(val_str)
+    except Exception:
+        return None
+
+
+def _parse_time_or_datetime(val: Any) -> Optional[Union[time, datetime]]:
+    """Parse either a time or a datetime from an ISO formatted string."""
+    if val is None:
+        return None
+    if isinstance(val, (datetime, time)):
+        return val
+    val_str = str(val).strip()
+    if not val_str:
+        return None
+    try:
+        if "T" in val_str or "-" in val_str:
+            return datetime.fromisoformat(val_str)
+        return time.fromisoformat(val_str)
+    except Exception:
+        try:
+            return time.fromisoformat(val_str)
+        except Exception:
+            return None
 
 
 @dataclass
@@ -159,11 +259,11 @@ class Task:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Task":
-        """Deserialize a Task from a dictionary."""
-        pref_t = time.fromisoformat(data["preferred_time"]) if data.get("preferred_time") else None
-        s_t = time.fromisoformat(data["start_time"]) if data.get("start_time") else None
-        sch_t = time.fromisoformat(data["scheduled_time"]) if data.get("scheduled_time") else None
-        sch_dt = datetime.fromisoformat(data["scheduled_datetime"]) if data.get("scheduled_datetime") else None
+        """Deserialize a Task from a dictionary using ISO formatted strings."""
+        pref_t = _parse_time(data.get("preferred_time"))
+        s_t = _parse_time(data.get("start_time"))
+        sch_t = _parse_time_or_datetime(data.get("scheduled_time"))
+        sch_dt = _parse_datetime(data.get("scheduled_datetime"))
         return cls(
             task_id=data.get("task_id", uuid4().hex[:8]),
             title=data.get("title", ""),
@@ -327,30 +427,62 @@ class Owner:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Owner":
         """Deserialize Owner from a dictionary."""
+        day_st = _parse_time(data.get("day_start")) or time(8, 0)
         owner = cls(
             name=data.get("name", ""),
             email=data.get("email", ""),
             contact=data.get("contact", ""),
             available_minutes=int(data.get("available_minutes", 120)),
-            day_start=time.fromisoformat(data["day_start"]) if data.get("day_start") else time(8, 0),
+            day_start=day_st,
         )
         for p_dict in data.get("pets", []):
             owner.add_pet(Pet.from_dict(p_dict))
         return owner
 
-    def save_to_json(self, filepath: str) -> None:
+    def save_to_json(self, filepath: str = "data.json") -> None:
         """Serialize owner profile and all pet commitments to a JSON file."""
-        import json
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def load_from_json(cls, filepath: str) -> "Owner":
-        """Load owner profile and all pet commitments from a JSON file."""
-        import json
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return cls.from_dict(data)
+    def load_from_json(cls, filepath: str = "data.json") -> "Owner":
+        """Load owner profile and all pet commitments from a JSON file.
+
+        Handles missing files gracefully by returning a new or default Owner instance.
+        """
+        if not os.path.exists(filepath):
+            return cls(
+                name="Alex Carter",
+                email="alex@example.com",
+                contact="alex@example.com",
+                available_minutes=180,
+                day_start=time(8, 0),
+            )
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return cls.from_dict(data)
+        except Exception:
+            return cls(
+                name="Alex Carter",
+                email="alex@example.com",
+                contact="alex@example.com",
+                available_minutes=180,
+                day_start=time(8, 0),
+            )
+
+
+def save_to_json(owner: Owner, filepath: str = "data.json") -> None:
+    """Save owner and all pets and tasks to a JSON file."""
+    owner.save_to_json(filepath)
+
+
+def load_from_json(filepath: str = "data.json") -> Owner:
+    """Load owner and all pets and tasks from a JSON file.
+
+    Handles missing or corrupted files gracefully by returning a new or default Owner instance.
+    """
+    return Owner.load_from_json(filepath)
 
 
 @dataclass
@@ -515,24 +647,31 @@ class Scheduler:
         return list(self.tasks)
 
     def sort_by_time(self, tasks: Optional[List[Task]] = None) -> List[Task]:
-        """Sort tasks chronologically by scheduled time, tie-breaking by priority weight."""
+        """Sort tasks chronologically by scheduled time, tie-breaking by priority weight descending."""
         task_list = self._resolve_tasks(tasks)
         return sorted(
             task_list,
             key=lambda t: (
-                t.scheduled_time or t.start_time or t.preferred_time or time(0, 0),
-                -t.weight(),
+                _task_effective_time(t),
+                -PRIORITY_WEIGHTS.get(t.priority, 2),
             ),
         )
 
     def sort_by_priority(self, tasks: Optional[List[Task]] = None) -> List[Task]:
-        """Sort tasks by descending priority weight, tie-breaking by earliest scheduled time."""
+        """Sort tasks by priority first, then by time, pushing completed tasks to bottom.
+
+        Sorting Strategy:
+        1. Incomplete tasks first, completed tasks pushed to bottom.
+        2. Primary key: Priority weight descending (HIGH: 3 > MEDIUM: 2 > LOW: 1).
+        3. Secondary key: Chronological scheduled_time ascending (earliest time first within same priority tier).
+        """
         task_list = self._resolve_tasks(tasks)
         return sorted(
             task_list,
             key=lambda t: (
-                -t.weight(),
-                t.scheduled_time or t.start_time or t.preferred_time or time(23, 59, 59),
+                1 if (t.completed or t.is_completed) else 0,
+                -PRIORITY_WEIGHTS.get(t.priority, 2),
+                _task_effective_time(t),
             ),
         )
 
@@ -558,52 +697,71 @@ class Scheduler:
     def find_next_available_slot(
         self,
         duration_minutes: int,
-        search_date: date,
-        work_day_start: time = time(8, 0),
-        work_day_end: time = time(20, 0),
+        target_date: Optional[date] = None,
+        day_start: time = time(8, 0),
+        day_end: time = time(20, 0),
+        search_date: Optional[date] = None,
+        work_day_start: Optional[time] = None,
+        work_day_end: Optional[time] = None,
     ) -> Optional[datetime]:
-        """Find the earliest continuous free window of at least duration_minutes within operating hours."""
-        task_list = self.owner.get_all_tasks(pending_only=False) if self.owner else list(self.tasks)
-        day_start_dt = datetime.combine(search_date, work_day_start)
-        day_end_dt = datetime.combine(search_date, work_day_end)
+        """Find the earliest continuous unbooked window of at least duration_minutes.
 
-        busy_intervals: List[tuple[datetime, datetime]] = []
-        for t in task_list:
-            if t.scheduled_datetime is not None and t.scheduled_datetime.date() != search_date:
+        Collects pending tasks for target_date across all pets, merges overlapping
+        or contiguous busy intervals, and scans between day_start and day_end.
+        """
+        actual_date = target_date or search_date or date.today()
+        actual_start = work_day_start or day_start
+        actual_end = work_day_end or day_end
+
+        needed = timedelta(minutes=duration_minutes)
+        window_start = datetime.combine(actual_date, actual_start)
+        window_end = datetime.combine(actual_date, actual_end)
+
+        # Gather and filter non-completed tasks for this date across all pets
+        day_tasks: List[tuple[Task, datetime]] = []
+        for t in self.collect_all_tasks():
+            if t.is_completed:
                 continue
 
-            task_time = t.scheduled_time or t.start_time or t.preferred_time
-            if task_time is None:
-                continue
-
-            t_start = datetime.combine(search_date, task_time)
-            t_end = t_start + timedelta(minutes=t.duration_minutes)
-
-            if t_end <= day_start_dt or t_start >= day_end_dt:
-                continue
-            busy_intervals.append((max(t_start, day_start_dt), min(t_end, day_end_dt)))
-
-        merged: List[tuple[datetime, datetime]] = []
-        for interval in sorted(busy_intervals, key=lambda x: x[0]):
-            if not merged:
-                merged.append(interval)
+            if isinstance(t.scheduled_time, datetime):
+                s_dt = t.scheduled_time
+            elif t.scheduled_datetime is not None:
+                s_dt = t.scheduled_datetime
+            elif isinstance(t.scheduled_time, time):
+                s_dt = datetime.combine(actual_date, t.scheduled_time)
+            elif t.start_time is not None:
+                s_dt = datetime.combine(actual_date, t.start_time)
+            elif t.preferred_time is not None:
+                s_dt = datetime.combine(actual_date, t.preferred_time)
             else:
-                prev_s, prev_e = merged[-1]
-                cur_s, cur_e = interval
-                if cur_s <= prev_e:
-                    merged[-1] = (prev_s, max(prev_e, cur_e))
+                continue
+
+            if s_dt.date() == actual_date:
+                day_tasks.append((t, s_dt))
+
+        # Sort tasks chronologically by scheduled start time
+        day_tasks.sort(key=lambda item: item[1])
+
+        # Merge overlapping or contiguous busy intervals
+        busy_intervals: List[list[datetime]] = []
+        for t, s_dt in day_tasks:
+            start = max(s_dt, window_start)
+            end = min(s_dt + timedelta(minutes=t.duration_minutes), window_end)
+            if start < end:
+                if not busy_intervals or busy_intervals[-1][1] < start:
+                    busy_intervals.append([start, end])
                 else:
-                    merged.append(interval)
+                    busy_intervals[-1][1] = max(busy_intervals[-1][1], end)
 
-        cursor = day_start_dt
-        for int_start, int_end in merged:
-            gap_minutes = (int_start - cursor).total_seconds() / 60
-            if gap_minutes >= duration_minutes:
-                return cursor
-            cursor = max(cursor, int_end)
+        # Scan for the earliest continuous idle window
+        current_time = window_start
+        for b_start, b_end in busy_intervals:
+            if b_start - current_time >= needed:
+                return current_time
+            current_time = max(current_time, b_end)
 
-        if (day_end_dt - cursor).total_seconds() / 60 >= duration_minutes:
-            return cursor
+        if window_end - current_time >= needed:
+            return current_time
 
         return None
 

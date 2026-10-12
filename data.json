@@ -1,0 +1,89 @@
+{
+  "name": "Alex Carter",
+  "email": "alex@example.com",
+  "contact": "alex@example.com",
+  "available_minutes": 180,
+  "day_start": "08:00:00",
+  "pets": [
+    {
+      "pet_id": "pet_1",
+      "name": "Luna",
+      "species": "Dog",
+      "breed": "Golden Retriever",
+      "age_years": 3.0,
+      "notes": "",
+      "tasks": [
+        {
+          "task_id": "9e299bd3",
+          "title": "Morning Park Walk",
+          "description": "Morning Park Walk",
+          "duration_minutes": 45,
+          "priority": "high",
+          "category": "walk",
+          "preferred_time": "09:00:00",
+          "completed": false,
+          "start_time": "09:00:00",
+          "scheduled_time": "09:00:00",
+          "scheduled_datetime": "2026-10-11T09:00:00",
+          "pet_name": "Luna",
+          "recurrence": "NONE"
+        },
+        {
+          "task_id": "c0d17fe9",
+          "title": "Daily Breakfast & Supplements",
+          "description": "Daily Breakfast & Supplements",
+          "duration_minutes": 15,
+          "priority": "high",
+          "category": "feeding",
+          "preferred_time": "08:00:00",
+          "completed": false,
+          "start_time": "08:00:00",
+          "scheduled_time": "08:00:00",
+          "scheduled_datetime": "2026-10-11T08:00:00",
+          "pet_name": "Luna",
+          "recurrence": "DAILY"
+        }
+      ]
+    },
+    {
+      "pet_id": "pet_2",
+      "name": "Mochi",
+      "species": "Cat",
+      "breed": "Siamese Cat",
+      "age_years": 2.0,
+      "notes": "",
+      "tasks": [
+        {
+          "task_id": "b910c518",
+          "title": "Vet Check & Vaccine",
+          "description": "Vet Check & Vaccine",
+          "duration_minutes": 30,
+          "priority": "high",
+          "category": "appointment",
+          "preferred_time": "09:15:00",
+          "completed": false,
+          "start_time": "09:15:00",
+          "scheduled_time": "09:15:00",
+          "scheduled_datetime": "2026-10-11T09:15:00",
+          "pet_name": "Mochi",
+          "recurrence": "NONE"
+        },
+        {
+          "task_id": "26d3642e",
+          "title": "Daily Insulin Dose",
+          "description": "Daily Insulin Dose",
+          "duration_minutes": 15,
+          "priority": "critical",
+          "category": "medication",
+          "preferred_time": "08:15:00",
+          "completed": false,
+          "start_time": "08:15:00",
+          "scheduled_time": "08:15:00",
+          "scheduled_datetime": "2026-10-11T08:15:00",
+          "pet_name": "Mochi",
+          "recurrence": "DAILY"
+        }
+      ]
+    }
+  ]
+}

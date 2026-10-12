@@ -12,7 +12,15 @@ Covers:
 
 from datetime import date, datetime, time, timedelta
 import pytest
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import (
+    PRIORITY_WEIGHTS,
+    Owner,
+    Pet,
+    Scheduler,
+    Task,
+    load_from_json,
+    save_to_json,
+)
 
 
 # -----------------------------------------------------------------------------
@@ -388,16 +396,89 @@ def test_scheduler_find_next_available_slot(sample_owner: Owner, scheduler: Sche
     assert slot_empty == datetime(2026, 10, 20, 8, 0), "Empty schedule should suggest day_start"
 
 
+def test_find_next_available_slot_challenge_1():
+    """Verify Challenge 1 requirements: target_date signature, interval merging, and gap detection."""
+    target_d = date(2026, 10, 25)
+    owner = Owner(name="Alex Rivera", day_start=time(8, 0))
+    pet_a = Pet(name="Luna", species="Dog")
+    pet_b = Pet(name="Mochi", species="Cat")
+
+    # Overlapping tasks that must merge into a single busy interval: [08:00, 09:15]
+    t1 = Task(
+        title="Luna Morning Walk",
+        duration_minutes=45,
+        scheduled_time=time(8, 0),
+        scheduled_datetime=datetime(2026, 10, 25, 8, 0),
+    )
+    t2 = Task(
+        title="Mochi Vet Check",
+        duration_minutes=45,
+        scheduled_time=time(8, 30),
+        scheduled_datetime=datetime(2026, 10, 25, 8, 30),
+    )
+    # A completed task that should be IGNORED (10:00 - 11:00)
+    t_completed = Task(
+        title="Completed Grooming",
+        duration_minutes=60,
+        completed=True,
+        scheduled_time=time(10, 0),
+        scheduled_datetime=datetime(2026, 10, 25, 10, 0),
+    )
+
+    pet_a.add_task(t1)
+    pet_b.add_task(t2)
+    pet_a.add_task(t_completed)
+    owner.add_pet(pet_a)
+    owner.add_pet(pet_b)
+
+    scheduler = Scheduler(owner=owner)
+
+    # 1. Test target_date signature with interval merging:
+    # Gap after merged busy block [08:00, 09:15] opens at 09:15:
+    slot = scheduler.find_next_available_slot(
+        duration_minutes=30,
+        target_date=target_d,
+        day_start=time(8, 0),
+        day_end=time(20, 0),
+    )
+    assert slot == datetime(2026, 10, 25, 9, 15), f"Expected 09:15, got {slot}"
+
+    # Verify when scheduled_time is passed as a pure datetime object
+    t3 = Task(
+        title="Luna Afternoon Training",
+        duration_minutes=60,
+        scheduled_time=datetime(2026, 10, 25, 14, 0),
+    )
+    pet_a.add_task(t3)
+    slot_afternoon = scheduler.find_next_available_slot(
+        duration_minutes=60,
+        target_date=target_d,
+        day_start=time(13, 0),
+        day_end=time(16, 0),
+    )
+    # Window 13:00 to 14:00 is 60 min, so earliest slot is 13:00
+    assert slot_afternoon == datetime(2026, 10, 25, 13, 0)
+
+    # 2. Test when operating hours cannot accommodate the requested duration:
+    slot_impossible = scheduler.find_next_available_slot(
+        duration_minutes=1200,  # 20 hours exceeds daily window
+        target_date=target_d,
+        day_start=time(8, 0),
+        day_end=time(20, 0),
+    )
+    assert slot_impossible is None, "Should return None when no window fits inside operating hours"
+
+
+
 def test_persistence_json_serialization(tmp_path, sample_owner: Owner):
     """Verify JSON persistence layer: to_dict, from_dict, save_to_json, and load_from_json."""
     file_path = tmp_path / "owner_data.json"
 
-    # Save owner with 2 pets and preconfigured tasks to JSON
-    sample_owner.save_to_json(str(file_path))
+    # 1. Test top-level save_to_json and load_from_json
+    save_to_json(sample_owner, str(file_path))
     assert file_path.exists(), "JSON file should be created"
 
-    # Load owner from JSON
-    loaded_owner = Owner.load_from_json(str(file_path))
+    loaded_owner = load_from_json(str(file_path))
 
     # Assert structural integrity and data equality
     assert loaded_owner.name == sample_owner.name
@@ -412,4 +493,155 @@ def test_persistence_json_serialization(tmp_path, sample_owner: Owner):
     assert len(loaded_tasks) == len(orig_tasks)
     assert [t.title for t in loaded_tasks] == [t.title for t in orig_tasks]
     assert [t.priority for t in loaded_tasks] == [t.priority for t in orig_tasks]
+
+    # 2. Test missing file graceful fallback (returns default Owner)
+    missing_file = tmp_path / "does_not_exist.json"
+    default_owner = load_from_json(str(missing_file))
+    assert isinstance(default_owner, Owner)
+    assert default_owner.name != ""
+
+    # 3. Test Task to_dict and from_dict with ISO formatted datetimes
+    task_with_dt = Task(
+        title="Emergency Vet",
+        duration_minutes=45,
+        priority="critical",
+        scheduled_time=time(14, 30),
+        scheduled_datetime=datetime(2026, 10, 25, 14, 30),
+    )
+    t_dict = task_with_dt.to_dict()
+    assert t_dict["scheduled_datetime"] == "2026-10-25T14:30:00"
+    restored_task = Task.from_dict(t_dict)
+    assert restored_task.title == "Emergency Vet"
+    assert restored_task.scheduled_datetime == datetime(2026, 10, 25, 14, 30)
+    assert restored_task.duration_minutes == 45
+
+    # 4. Test Pet to_dict and from_dict
+    pet = Pet(name="Bella", species="Dog", breed="Beagle", age_years=4.0)
+    pet.add_task(task_with_dt)
+    p_dict = pet.to_dict()
+    restored_pet = Pet.from_dict(p_dict)
+    assert restored_pet.name == "Bella"
+    assert len(restored_pet.tasks) == 1
+    assert restored_pet.tasks[0].title == "Emergency Vet"
+
+
+def test_priority_scheduling_challenge_3():
+    """Verify Challenge 3 requirements:
+    1. PRIORITY_WEIGHTS mapping (HIGH: 3, MEDIUM: 2, LOW: 1).
+    2. Primary key: priority weight descending (HIGH first).
+    3. Secondary key: chronological scheduled_time ascending.
+    4. Incomplete tasks first, completed tasks pushed to bottom.
+    """
+    assert PRIORITY_WEIGHTS["HIGH"] == 3
+    assert PRIORITY_WEIGHTS["MEDIUM"] == 2
+    assert PRIORITY_WEIGHTS["LOW"] == 1
+
+    scheduler = Scheduler()
+
+    t_low_noon = Task(title="Brush Coat", priority="LOW", scheduled_time=time(12, 0))
+    t_low_morn = Task(title="Trim Nails", priority="LOW", scheduled_time=time(9, 0))
+    t_med_aft = Task(title="Park Walk", priority="MEDIUM", scheduled_time=time(16, 0))
+    t_med_morn = Task(title="Breakfast", priority="MEDIUM", scheduled_time=time(8, 0))
+    t_high_late = Task(title="Vet Visit", priority="HIGH", scheduled_time=time(11, 0))
+    t_high_early = Task(title="Insulin Dose", priority="HIGH", scheduled_time=time(7, 30))
+    # Completed task - even though HIGH priority and early, must be pushed to bottom
+    t_high_done = Task(title="Morning Pill", priority="HIGH", scheduled_time=time(6, 0), completed=True)
+
+    scrambled = [
+        t_low_noon,
+        t_high_done,
+        t_med_aft,
+        t_high_late,
+        t_low_morn,
+        t_high_early,
+        t_med_morn,
+    ]
+
+    sorted_tasks = scheduler.sort_by_priority(scrambled)
+
+    # Expected order:
+    # 1. Incomplete HIGH: t_high_early (07:30), t_high_late (11:00)
+    # 2. Incomplete MEDIUM: t_med_morn (08:00), t_med_aft (16:00)
+    # 3. Incomplete LOW: t_low_morn (09:00), t_low_noon (12:00)
+    # 4. Completed: t_high_done (06:00) pushed to bottom!
+    expected = [
+        t_high_early,
+        t_high_late,
+        t_med_morn,
+        t_med_aft,
+        t_low_morn,
+        t_low_noon,
+        t_high_done,
+    ]
+
+    assert sorted_tasks == expected, (
+        f"Expected {[t.title for t in expected]}, got {[t.title for t in sorted_tasks]}"
+    )
+
+
+def test_cli_formatting_helpers_challenge_4(capsys):
+    """Verify Challenge 4 Professional UI & Output Formatting:
+    1. Emoji indicators for Priority: HIGH = '🚨 HIGH', MEDIUM = '⚡ MEDIUM', LOW = '🌱 LOW'.
+    2. Status badges: COMPLETED = '✅ Done', PENDING = '⏳ Pending'.
+    3. Category emojis: Walk = '🦮', Medication = '💊', Meal = '🍖', Vet = '🩺'.
+    4. Table and block printers render without exceptions.
+    """
+    from main import (
+        get_category_emoji,
+        get_priority_badge,
+        get_status_badge,
+        print_conflict_block,
+        print_slot_block,
+        print_table,
+    )
+
+    # 1. Emoji category mapping
+    t_walk = Task(title="Morning Walk", category="walk")
+    t_med = Task(title="Insulin Injection", category="medication")
+    t_meal = Task(title="Evening Meal", category="feeding")
+    t_vet = Task(title="Vet Visit", category="appointment")
+    assert get_category_emoji(t_walk) == "🦮"
+    assert get_category_emoji(t_med) == "💊"
+    assert get_category_emoji(t_meal) == "🍖"
+    assert get_category_emoji(t_vet) == "🩺"
+
+    # 2. Priority badges
+    assert "🚨 HIGH" in get_priority_badge("HIGH")
+    assert "⚡ MEDIUM" in get_priority_badge("MEDIUM")
+    assert "🌱 LOW" in get_priority_badge("LOW")
+
+    # 3. Status badges
+    assert "✅ Done" in get_status_badge(True)
+    assert "⏳ Pending" in get_status_badge(False)
+
+    # 4. Table and block rendering
+    print_table([t_walk, t_med], title="Test Table")
+    captured = capsys.readouterr().out
+    assert "Status" in captured
+    assert "Time" in captured
+    assert "Pet" in captured
+    assert "Task" in captured
+    assert "Duration" in captured
+    assert "Priority" in captured
+    assert "🦮 Morning Walk" in captured
+
+    # Conflict block
+    conflict = {
+        "task_1": t_walk,
+        "task_2": t_med,
+        "overlap_minutes": 15,
+        "warning_message": "Overlapping window",
+    }
+    print_conflict_block([conflict])
+    captured_conflict = capsys.readouterr().out
+    assert "SCHEDULING CONFLICT DETECTED" in captured_conflict
+    assert "15 minutes" in captured_conflict
+
+    # Slot block
+    print_slot_block(datetime(2026, 10, 11, 10, 0), 45, date(2026, 10, 11))
+    captured_slot = capsys.readouterr().out
+    assert "OPTIMAL FREE CARE WINDOW RECOMMENDED" in captured_slot
+    assert "45 min continuous" in captured_slot
+
+
 

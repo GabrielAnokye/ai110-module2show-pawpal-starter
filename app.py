@@ -9,8 +9,17 @@ with an interactive, modern dashboard UI exposing Phase 4 algorithmic capabiliti
 """
 
 from datetime import date, datetime, time, timedelta
+import os
 import streamlit as st
-from pawpal_system import Owner, Pet, Scheduler, Task, add_minutes_to_time
+from pawpal_system import (
+    Owner,
+    Pet,
+    Scheduler,
+    Task,
+    add_minutes_to_time,
+    load_from_json,
+    save_to_json,
+)
 
 # -----------------------------------------------------------------------------
 # 1. Page Configuration & Custom CSS
@@ -80,25 +89,23 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------------------
-# 2. Session State Management
+# 2. Session State Management & Data Persistence
 # -----------------------------------------------------------------------------
-if "owner" not in st.session_state:
-    # Initialize default owner
+DATA_FILE = "data.json"
+
+
+def _create_default_demo_owner() -> Owner:
+    """Helper creating default demo owner with Luna and Mochi tasks."""
     owner = Owner(
         name="Alex Carter",
         contact="alex@example.com",
         available_minutes=180,
         day_start=time(8, 0),
     )
-
-    # Populate with 2 initial sample pets
     luna = Pet(name="Luna", species="Dog", breed="Golden Retriever", age_years=3.0, pet_id="pet_1")
     mochi = Pet(name="Mochi", species="Cat", breed="Siamese Cat", age_years=2.0, pet_id="pet_2")
-
     today = date.today()
 
-    # Attach initial sample care tasks with intentional real-world scenario
-    # Luna's walk (09:00 - 09:45)
     t_walk = Task(
         title="Morning Park Walk",
         description="Morning Park Walk",
@@ -110,7 +117,6 @@ if "owner" not in st.session_state:
         scheduled_datetime=datetime.combine(today, time(9, 0)),
         recurrence="NONE",
     )
-    # Luna's breakfast (08:00 - 08:15) - DAILY recurrence
     t_breakfast = Task(
         title="Daily Breakfast & Supplements",
         description="Daily Breakfast & Supplements",
@@ -122,7 +128,6 @@ if "owner" not in st.session_state:
         scheduled_datetime=datetime.combine(today, time(8, 0)),
         recurrence="DAILY",
     )
-    # Mochi's vet visit (09:15 - 09:45) - Intentionally overlaps with Luna's walk to demo conflict detector!
     t_vet = Task(
         title="Vet Check & Vaccine",
         description="Vet Check & Vaccine",
@@ -134,7 +139,6 @@ if "owner" not in st.session_state:
         scheduled_datetime=datetime.combine(today, time(9, 15)),
         recurrence="NONE",
     )
-    # Mochi's insulin dose (08:15 - 08:30) - DAILY recurrence
     t_insulin = Task(
         title="Daily Insulin Dose",
         description="Daily Insulin Dose",
@@ -154,7 +158,19 @@ if "owner" not in st.session_state:
 
     owner.add_pet(luna)
     owner.add_pet(mochi)
-    st.session_state.owner = owner
+    return owner
+
+
+if "owner" not in st.session_state:
+    if os.path.exists(DATA_FILE):
+        try:
+            st.session_state.owner = load_from_json(DATA_FILE)
+        except Exception:
+            st.session_state.owner = _create_default_demo_owner()
+            save_to_json(st.session_state.owner, DATA_FILE)
+    else:
+        st.session_state.owner = _create_default_demo_owner()
+        save_to_json(st.session_state.owner, DATA_FILE)
 
 # Defensive check: ensure scheduler is fresh and linked to owner
 if "scheduler" not in st.session_state or not hasattr(st.session_state.scheduler, "detect_conflicts"):
@@ -180,6 +196,7 @@ with st.sidebar:
     )
     if new_budget != owner_obj.available_minutes:
         owner_obj.available_minutes = new_budget
+        save_to_json(owner_obj, DATA_FILE)
         st.toast(f"Updated time budget to {new_budget} min!")
 
     start_h = st.selectbox(
@@ -190,6 +207,7 @@ with st.sidebar:
     )
     if start_h != owner_obj.day_start.hour:
         owner_obj.day_start = time(start_h, 0)
+        save_to_json(owner_obj, DATA_FILE)
         st.toast(f"Day start updated to {start_h:02d}:00 AM")
 
     strategy = st.selectbox(
@@ -202,6 +220,11 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔄 Reset to Default Scenario Data"):
+        if os.path.exists(DATA_FILE):
+            try:
+                os.remove(DATA_FILE)
+            except OSError:
+                pass
         del st.session_state["owner"]
         del st.session_state["scheduler"]
         st.rerun()
@@ -445,6 +468,7 @@ with tab_dashboard:
                     if task.completed:
                         if st.button("Undo", key=f"btn_undo_{task.task_id}", help="Revert to pending"):
                             task.mark_pending()
+                            save_to_json(st.session_state.owner, DATA_FILE)
                             st.toast(f"Reverted '{task.title}' to pending status.", icon="↩️")
                             st.rerun()
                     else:
@@ -456,6 +480,7 @@ with tab_dashboard:
                         ):
                             is_recurring = task.recurrence in ["DAILY", "WEEKLY"]
                             spawned_task = st.session_state.scheduler.complete_task(task.task_id)
+                            save_to_json(st.session_state.owner, DATA_FILE)
                             if is_recurring and spawned_task:
                                 next_time_str = (
                                     spawned_task.scheduled_datetime.strftime("%a %b %d at %H:%M")
@@ -561,6 +586,7 @@ with tab_manage:
                         pet_id=pet_id,
                     )
                     st.session_state.owner.add_pet(new_pet)
+                    save_to_json(st.session_state.owner, DATA_FILE)
                     st.success(f"Added {new_pet.name} ({new_pet.species}) successfully!")
                     st.rerun()
 
@@ -631,6 +657,7 @@ with tab_manage:
                             task_id=task_id,
                         )
                         selected_pet.add_task(new_task)
+                        save_to_json(st.session_state.owner, DATA_FILE)
                         st.success(
                             f"Task '{new_task.title}' added for {selected_pet.name}!"
                         )
@@ -658,4 +685,5 @@ with tab_manage:
                     )
                     if c4.button("🗑️", key=f"del_{t.task_id}", help="Delete task"):
                         pet.remove_task(t.task_id)
+                        save_to_json(st.session_state.owner, DATA_FILE)
                         st.rerun()

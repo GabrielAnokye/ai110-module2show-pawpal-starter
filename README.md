@@ -129,9 +129,12 @@ classDiagram
 
 PawPal+ includes an algorithmic scheduling engine implemented in `pawpal_system.py`:
 
-- **Multi-Key Sorting (`Scheduler.sort_by_time`, `Scheduler.sort_by_priority`)**:
-  - `Scheduler.sort_by_time`: Orders commitments chronologically by `scheduled_time`. If two tasks share the same start time, it intelligently tie-breaks using descending priority weights (`CRITICAL: 40` > `HIGH: 30` > `MEDIUM: 20` > `LOW: 10`).
-  - `Scheduler.sort_by_priority`: Sorts tasks primarily by priority tier and weight, resolving equal priorities by earliest scheduled time to ensure critical healthcare routines take precedence.
+- **Multi-Key Sorting & Priority-Based Scheduling (`Scheduler.sort_by_time`, `Scheduler.sort_by_priority`)**:
+  - `Scheduler.sort_by_time`: Orders commitments chronologically by `scheduled_time`. If two tasks share the same start time, it intelligently tie-breaks using descending priority weights (`HIGH: 3` > `MEDIUM: 2` > `LOW: 1`).
+  - `Scheduler.sort_by_priority`: Priority-Based Scheduling engine implementing a strict 3-tier sort strategy:
+    1. *Status Partition*: Incomplete/pending tasks first; completed tasks pushed to bottom.
+    2. *Primary Key*: Priority weight descending (`HIGH: 3` > `MEDIUM: 2` > `LOW: 1`).
+    3. *Secondary Key*: Earliest scheduled time ascending (`scheduled_time`), ensuring critical routines run first while respecting daily chronology.
 
 - **Multi-Criteria Filtering (`Scheduler.filter_tasks`)**:
   - Aggregates tasks across all pets registered under the `Owner` and supports concurrent, combinable filtering by `pet_name` (case-insensitive substring match), completion state (`is_completed=True/False`), and priority tier (`"LOW"`, `"MEDIUM"`, `"HIGH"`, `"CRITICAL"`). Returns an empty list `[]` when no matches exist without throwing exceptions.
@@ -166,88 +169,202 @@ PawPal+ includes an algorithmic scheduling engine implemented in `pawpal_system.
 5. **Interactive Completion & Recurrence Handling**: Toggle tasks between "Done" and "Undo". Marking a recurring task done immediately spawns the next occurrence for tomorrow/next week with a confirmation toast notification.
 6. **Smart Slot Recommender Widget**: Expand the `🔍 Find Next Open Care Slot` tool, select a duration slider (e.g. 45 min) and date, and click "Scan Open Slot" to get an immediate metric card with start and end times.
 
+### Professional CLI Formatting & UI Features (Challenge 4)
+
+PawPal+ features professional, executive-grade CLI formatting using the `tabulate` library, visual emoji badges, and styled ANSI color-coded containers.
+
+#### 1. Libraries and Utilities Used
+- **`tabulate` (`tablefmt="rounded_outline"`)**: Formats complex multi-attribute schedules into clean Unicode tables with rounded outline borders (`╭─┬─╮`, `│ │`, `╰─┴─╯`), ensuring fixed-width column alignment across variable-length task titles.
+- **ANSI Escape Code Palette**:
+  - `CYAN` (`\033[96m`) & `GREEN` (`\033[92m`): Section headers and optimal free slot recommendation blocks.
+  - `RED` (`\033[91m`): High-visibility double-bordered conflict alert boxes (`╔═════╗`).
+  - `YELLOW` (`\033[93m`): Pending status indicators and medium priority tags.
+  - `MAGENTA` (`\033[95m`): Brand banners and section icons.
+- **Python `datetime` & `timedelta`**: Standardized duration and timestamp calculations.
+
+#### 2. Formatting Functions Implemented in `main.py`
+- **`get_category_emoji(task: Task) -> str`**: Maps care task types to intuitive emoji badges:
+  - Walk = `🦮`
+  - Medication = `💊`
+  - Meal / Feeding = `🍖`
+  - Vet / Appointment = `🩺`
+  - Grooming = `✂️`
+- **`get_priority_badge(priority: str) -> str`**: Formats priority tiers with color-coded emoji tags:
+  - HIGH = `🚨 HIGH`
+  - MEDIUM = `⚡ MEDIUM`
+  - LOW = `🌱 LOW`
+  - CRITICAL = `🚨 CRITICAL`
+- **`get_status_badge(completed: bool) -> str`**: Renders dynamic lifecycle indicators:
+  - COMPLETED = `✅ Done`
+  - PENDING = `⏳ Pending`
+- **`print_table(tasks: list[Task], title: str = "SCHEDULE") -> None`**: Formats schedules via `tabulate` with the exact column layout:
+  `[Status] | [Time] | [Pet] | [Task] | [Duration] | [Priority]`
+- **`print_conflict_block(conflicts: list[dict]) -> None`**: Renders multi-pet schedule conflicts inside styled ANSI red double-bordered warning boxes (`╔═════════════╗`) detailing conflicting tasks, caregiver pets, and exact overlap minutes.
+- **`print_slot_block(slot: datetime, duration_minutes: int, target_date: date) -> None`**: Renders optimal continuous care slot recommendations inside styled ANSI cyan/green double-bordered boxes (`╔═════════════╗`).
+
 ### Terminal Demonstration Output (`python main.py`)
 
-Below is the verified terminal output from running `python main.py`, showcasing the scenario with Owner Alex Carter, pets Luna and Mochi, out-of-order tasks, overlapping commitments, recurrence lifecycle, and the slot finder:
+Below is the verified terminal output from running `python main.py`, showcasing the scenario with Owner Alex Carter, pets Luna and Mochi, out-of-order tasks, 3-tier priority scheduling, cross-pet conflict detection, recurrence lifecycle, and the slot finder:
 
 ```text
-============================================================================
-🐾                     PAWPAL+ ALGORITHMIC ENGINE DEMO                      🐾
-                Multi-Pet Scheduling, Conflicts & Slot Finder                 
-============================================================================
+══════════════════════════════════════════════════════════════════════════════
+🐾                      PAWPAL+ ALGORITHMIC ENGINE DEMO                       🐾
+                 Multi-Pet Scheduling, Conflicts & Slot Finder                  
+══════════════════════════════════════════════════════════════════════════════
 
 👤 Owner: Alex Carter (alex@example.com)
 🐾 Pets Registered: Luna (Golden Retriever) & Mochi (Siamese Cat)
 📋 Total Tasks Loaded: 6 across all pets.
 
 ▶ STEP A: MULTI-ATTRIBUTE CHRONOLOGICAL SORTING
-----------------------------------------------------------------------------
-Unsorted Raw Input Order (Tasks as entered):
-Scheduled   | Pet       | Priority   | Duration  | Recur    | Status     | Description
-----------------------------------------------------------------------------------------
-17:00       | Luna      | MEDIUM     | 30 min    | None     | PENDING    | Evening Park Walk
-09:00       | Luna      | HIGH       | 45 min    | None     | PENDING    | Morning Walk
-08:00       | Luna      | HIGH       | 15 min    | Daily    | PENDING    | Daily Breakfast
-09:15       | Mochi     | HIGH       | 30 min    | None     | PENDING    | Vet Check & Vaccine
-08:15       | Mochi     | CRITICAL   | 15 min    | Daily    | PENDING    | Insulin Injection
-14:00       | Mochi     | LOW        | 20 min    | None     | PENDING    | Coat Brushing
-----------------------------------------------------------------------------------------
+──────────────────────────────────────────────────────────────────────────────
 
-Chronologically Ordered Schedule (via scheduler.sort_by_time()):
-Scheduled   | Pet       | Priority   | Duration  | Recur    | Status     | Description
-----------------------------------------------------------------------------------------
-08:00       | Luna      | HIGH       | 15 min    | Daily    | PENDING    | Daily Breakfast
-08:15       | Mochi     | CRITICAL   | 15 min    | Daily    | PENDING    | Insulin Injection
-09:00       | Luna      | HIGH       | 45 min    | None     | PENDING    | Morning Walk
-09:15       | Mochi     | HIGH       | 30 min    | None     | PENDING    | Vet Check & Vaccine
-14:00       | Mochi     | LOW        | 20 min    | None     | PENDING    | Coat Brushing
-17:00       | Luna      | MEDIUM     | 30 min    | None     | PENDING    | Evening Park Walk
-----------------------------------------------------------------------------------------
+📋 Unsorted Raw Input Order (Tasks as entered):
+╭───────────┬────────┬───────┬───────────────────────┬────────────┬────────────╮
+│ Status    │ Time   │ Pet   │ Task                  │ Duration   │ Priority   │
+├───────────┼────────┼───────┼───────────────────────┼────────────┼────────────┤
+│ ⏳ Pending │ 17:00  │ Luna  │ 🦮 Evening Park Walk   │ 30 min     │ ⚡ MEDIUM   │
+│ ⏳ Pending │ 09:00  │ Luna  │ 🦮 Morning Walk        │ 45 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 08:00  │ Luna  │ 🍖 Daily Breakfast     │ 15 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 09:15  │ Mochi │ 🩺 Vet Check & Vaccine │ 30 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 08:15  │ Mochi │ 💊 Insulin Injection   │ 15 min     │ 🚨 CRITICAL │
+│ ⏳ Pending │ 14:00  │ Mochi │ ✂️ Coat Brushing      │ 20 min     │ 🌱 LOW      │
+╰───────────┴────────┴───────┴───────────────────────┴────────────┴────────────╯
+
+📋 Chronologically Ordered Schedule (via scheduler.sort_by_time()):
+╭───────────┬────────┬───────┬───────────────────────┬────────────┬────────────╮
+│ Status    │ Time   │ Pet   │ Task                  │ Duration   │ Priority   │
+├───────────┼────────┼───────┼───────────────────────┼────────────┼────────────┤
+│ ⏳ Pending │ 08:00  │ Luna  │ 🍖 Daily Breakfast     │ 15 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 08:15  │ Mochi │ 💊 Insulin Injection   │ 15 min     │ 🚨 CRITICAL │
+│ ⏳ Pending │ 09:00  │ Luna  │ 🦮 Morning Walk        │ 45 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 09:15  │ Mochi │ 🩺 Vet Check & Vaccine │ 30 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 14:00  │ Mochi │ ✂️ Coat Brushing      │ 20 min     │ 🌱 LOW      │
+│ ⏳ Pending │ 17:00  │ Luna  │ 🦮 Evening Park Walk   │ 30 min     │ ⚡ MEDIUM   │
+╰───────────┴────────┴───────┴───────────────────────┴────────────┴────────────╯
 ✔ Successfully ordered all tasks from 08:00 AM to 17:00 PM with priority tie-breaking.
 
-▶ STEP B: CROSS-PET CONFLICT DETECTION
-----------------------------------------------------------------------------
-🔍 Scanning all active commitments for overlapping time windows...
-⚠ Found 1 Scheduling Conflict(s):
-  [1] [CONFLICT] 'Morning Walk' (Luna, 09:00 - 09:45) overlaps with 'Vet Check & Vaccine' (Mochi, 09:15 - 09:45) by 30 mins.
-      ↳ Overlap Window: 30 minutes simultaneous demand.
+▶ STEP B: ADVANCED PRIORITY-BASED SCHEDULING (CHALLENGE 3)
+──────────────────────────────────────────────────────────────────────────────
+Algorithm: Priority Weights (HIGH: 3 > MEDIUM: 2 > LOW: 1) ➔ Time Tie-Break ➔ Completed at Bottom
 
-▶ STEP C: MULTI-CRITERIA FILTERING
-----------------------------------------------------------------------------
+📋 Priority-Ranked Schedule (via scheduler.sort_by_priority()):
+╭───────────┬────────┬───────┬───────────────────────┬────────────┬────────────╮
+│ Status    │ Time   │ Pet   │ Task                  │ Duration   │ Priority   │
+├───────────┼────────┼───────┼───────────────────────┼────────────┼────────────┤
+│ ⏳ Pending │ 08:15  │ Mochi │ 💊 Insulin Injection   │ 15 min     │ 🚨 CRITICAL │
+│ ⏳ Pending │ 08:00  │ Luna  │ 🍖 Daily Breakfast     │ 15 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 09:00  │ Luna  │ 🦮 Morning Walk        │ 45 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 09:15  │ Mochi │ 🩺 Vet Check & Vaccine │ 30 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 17:00  │ Luna  │ 🦮 Evening Park Walk   │ 30 min     │ ⚡ MEDIUM   │
+│ ⏳ Pending │ 14:00  │ Mochi │ ✂️ Coat Brushing      │ 20 min     │ 🌱 LOW      │
+│ ✅ Done    │ 07:00  │ Luna  │ 🦮 Early Morning Walk  │ 20 min     │ 🚨 HIGH     │
+╰───────────┴────────┴───────┴───────────────────────┴────────────┴────────────╯
+✔ Verified: HIGH tasks lead the schedule, tie-broken by time; completed tasks pushed to bottom!
+
+▶ STEP C: CROSS-PET CONFLICT DETECTION
+──────────────────────────────────────────────────────────────────────────────
+🔍 Scanning all active commitments for overlapping time windows...
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║  ⚠️  SCHEDULING CONFLICT DETECTED (1 OVERLAPPING WINDOW)                          ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║  [1] 🦮 'Morning Walk' (Luna, 09:00) ⚔️  🩺 'Vet Check & Vaccine' (Mochi, 09:15) ║
+║      ↳ Overlap Window: 30 minutes simultaneous care demand                        ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+▶ STEP D: MULTI-CRITERIA FILTERING
+──────────────────────────────────────────────────────────────────────────────
 🔍 Filter 1: Tasks with Priority == 'HIGH'
-   • [HIGH] Morning Walk for Luna at 09:00
-   • [HIGH] Daily Breakfast for Luna at 08:00
-   • [HIGH] Vet Check & Vaccine for Mochi at 09:15
+
+📋 Filtered Tasks: High Priority:
+╭───────────┬────────┬───────┬───────────────────────┬────────────┬────────────╮
+│ Status    │ Time   │ Pet   │ Task                  │ Duration   │ Priority   │
+├───────────┼────────┼───────┼───────────────────────┼────────────┼────────────┤
+│ ⏳ Pending │ 09:00  │ Luna  │ 🦮 Morning Walk        │ 45 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 08:00  │ Luna  │ 🍖 Daily Breakfast     │ 15 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 09:15  │ Mochi │ 🩺 Vet Check & Vaccine │ 30 min     │ 🚨 HIGH     │
+╰───────────┴────────┴───────┴───────────────────────┴────────────┴────────────╯
 
 🔍 Filter 2: Tasks assigned specifically to 'Mochi'
-   • [HIGH] Vet Check & Vaccine (30 min, scheduled 09:15)
-   • [CRITICAL] Insulin Injection (15 min, scheduled 08:15)
-   • [LOW] Coat Brushing (20 min, scheduled 14:00)
 
-▶ STEP D: AUTOMATED RECURRING TASK LIFECYCLE
-----------------------------------------------------------------------------
+📋 Filtered Tasks: Mochi Only:
+╭───────────┬────────┬───────┬───────────────────────┬────────────┬────────────╮
+│ Status    │ Time   │ Pet   │ Task                  │ Duration   │ Priority   │
+├───────────┼────────┼───────┼───────────────────────┼────────────┼────────────┤
+│ ⏳ Pending │ 09:15  │ Mochi │ 🩺 Vet Check & Vaccine │ 30 min     │ 🚨 HIGH     │
+│ ⏳ Pending │ 08:15  │ Mochi │ 💊 Insulin Injection   │ 15 min     │ 🚨 CRITICAL │
+│ ⏳ Pending │ 14:00  │ Mochi │ ✂️ Coat Brushing      │ 20 min     │ 🌱 LOW      │
+╰───────────┴────────┴───────┴───────────────────────┴────────────┴────────────╯
+
+▶ STEP E: AUTOMATED RECURRING TASK LIFECYCLE
+──────────────────────────────────────────────────────────────────────────────
 Completing recurring task: 'Daily Breakfast' for Luna (Recurrence: DAILY)...
 
 Result of complete_task():
-  1. Original Task ID: `7fb5c4bb` | Title: 'Daily Breakfast'
+  1. Original Task ID: `ea3ed6e0` | Title: 'Daily Breakfast'
      Status: is_completed = True [PRESERVED IN HISTORY]
-  2. Next Occurrence ID: `c4e1678a` | Title: 'Daily Breakfast'
+  2. Next Occurrence ID: `008d0568` | Title: 'Daily Breakfast'
      Status: is_completed = False [SPAWNED FOR NEXT CYCLE]
      New Scheduled Time: 2026-10-12 08:00
 ✔ Verified: Original task is preserved as DONE; new task spawned automatically for tomorrow!
 
-▶ STEP E: STRETCH FEATURE — NEXT AVAILABLE SLOT FINDER
-----------------------------------------------------------------------------
+▶ STEP F: STRETCH FEATURE — NEXT AVAILABLE SLOT FINDER
+──────────────────────────────────────────────────────────────────────────────
 🔍 Searching for earliest continuous free window of 45 minutes on 2026-10-11...
-✨ Found Available Window!
-   Suggested Start: 2026-10-11 09:45
-   Window Range:    09:45 ➔ 10:30 (45 min continuous opening)
 
-============================================================================
-🐾                              DEMO COMPLETE                               🐾
-            All Phase 4 Algorithmic Features Successfully Verified            
-============================================================================
+╔════════════════════════════════════════════════════════════════════════════╗
+║  ✨ OPTIMAL FREE CARE WINDOW RECOMMENDED                                    ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║  📅 Target Date:      Sunday, Oct 11, 2026                                 ║
+║  🕒 Suggested Window:  09:45 AM ➔ 10:30 AM (45 min continuous)                   ║
+║  💡 Confidence:        100% Conflict-Free across all pets                       ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+══════════════════════════════════════════════════════════════════════════════
+🐾                               DEMO COMPLETE                                🐾
+       All Algorithmic & UI Formatting Capabilities Successfully Verified       
+══════════════════════════════════════════════════════════════════════════════
 ```
+
+
+---
+
+## 💾 Data Persistence Layer
+
+PawPal+ includes a zero-dependency JSON persistence layer enabling pets, tasks, and caregiver preferences to persist across application restarts.
+
+### Marshmallow vs. Custom Dictionary Conversion
+When architecting persistence for nested domain objects with date/time properties, two design patterns were evaluated:
+- **Library Approach (`marshmallow` / `pydantic`)**: While schema libraries offer validation, they introduce external third-party dependencies, schema definition boilerplate (`TaskSchema`, `PetSchema`, `OwnerSchema`), and version synchronization friction.
+- **Custom Dictionary Conversion (Adopted)**: Implementing cohesive `to_dict()` and `from_dict()` methods directly on `Task`, `Pet`, and `Owner` uses Python's standard library (`json` and `datetime`). This guarantees zero external runtime dependencies, explicit control over ISO-8601 string formatting (`isoformat()` and `datetime.fromisoformat()`), and fine-grained defensive handling of mixed `datetime.time` / `datetime.datetime` attributes.
+
+### Persistence Workflow Architecture
+1. **Startup Auto-Load**:
+   - On application startup (`app.py`), the system checks for `data.json`.
+   - If `data.json` exists, `load_from_json("data.json")` reads and deserializes the entire object graph (`Owner` -> `Pet` -> `Task`) into `st.session_state.owner`.
+   - If `data.json` is missing or corrupted, the system initializes default scenario data and creates `data.json` immediately via `save_to_json(owner, "data.json")`.
+2. **Auto-Save on State Mutation**:
+   - **Adding a Pet**: Appends the new `Pet` to `owner.pets` and calls `save_to_json(st.session_state.owner, "data.json")`.
+   - **Scheduling a Task**: Appends the new `Task` to `pet.tasks` and calls `save_to_json(st.session_state.owner, "data.json")`.
+   - **Toggling Task Status (Done / Undo)**: Completing a task (or spawning its next recurring occurrence) immediately updates `data.json`.
+   - **Deleting a Task**: Removing a task from a pet's schedule updates `data.json`.
+   - **Modifying Owner Settings**: Adjusting time budget or day start hour in the sidebar updates `data.json`.
+   - **Resetting Data**: Clicking "Reset to Default Scenario Data" removes `data.json` and cleanly restores initial defaults.
+
+### Files Modified for Persistence
+- [`pawpal_system.py`](pawpal_system.py):
+  - `Task.to_dict()` & `Task.from_dict()`: Serializes and deserializes task attributes, handling ISO format strings for `scheduled_time`, `scheduled_datetime`, `preferred_time`, and `start_time`.
+  - `Pet.to_dict()` & `Pet.from_dict()`: Serializes pet metadata and recursively converts child `tasks`.
+  - `Owner.to_dict()` & `Owner.from_dict()`: Serializes caregiver preferences, time budget, day start hour, and child `pets`.
+  - `save_to_json(owner, filepath="data.json")`: Serializes the entire domain hierarchy to disk with 2-space indentation.
+  - `load_from_json(filepath="data.json")`: Reconstructs the `Owner` hierarchy, gracefully falling back to a default instance if the file is missing.
+- [`app.py`](app.py):
+  - Integrated `load_from_json` into session state initialization on app startup.
+  - Added real-time `save_to_json` triggers on pet registration, task creation, status toggle (Done/Undo), task deletion, and settings updates.
+  - Added `data.json` file cleanup on user-triggered reset.
+- [`tests/test_pawpal.py`](tests/test_pawpal.py):
+  - Implemented `test_persistence_json_serialization` verifying round-trip JSON serialization fidelity, missing-file fallback handling, and ISO string parsing for `datetime` and `time` objects.
 
 ---
 
@@ -270,6 +387,8 @@ The test suite in [`tests/test_pawpal.py`](tests/test_pawpal.py) provides compre
 - **24-Hour & 7-Day Recurrence Math**: Validates date incrementation across midnight and month transitions (e.g. Oct 31 to Nov 1).
 - **Graceful Empty States**: Verifies owners with 0 pets or empty task lists execute all methods (`collect_all_tasks`, `detect_conflicts`, `sort_by_time`, `filter_tasks`) safely.
 - **JSON Persistence Round-Trip**: Validates complete round-trip serialization and deserialization (`to_dict`, `from_dict`, `save_to_json`, `load_from_json`).
+- **Priority Tier Sorting**: Validates 3-tier weighting (`HIGH: 3 > MEDIUM: 2 > LOW: 1`), chronological tie-breaking, and completed task relegation.
+- **CLI Formatting Helpers**: Verifies category emoji mappings (`🦮`, `💊`, `🍖`, `🩺`), priority indicators, status badges, and table/block rendering.
 
 ### Terminal Output
 
@@ -281,22 +400,25 @@ rootdir: /Users/gabrielanokye/AI Engineer/ai110-module2show-pawpal-starter
 configfile: pytest.ini
 testpaths: tests
 plugins: anyio-4.15.1
-collected 12 items
+collected 15 items
 
-tests/test_pawpal.py::test_task_lifecycle_and_completion PASSED          [  8%]
-tests/test_pawpal.py::test_sorting_chronological_and_priority PASSED     [ 16%]
-tests/test_pawpal.py::test_filter_tasks_by_multiple_criteria PASSED      [ 25%]
-tests/test_pawpal.py::test_daily_recurrence_generation PASSED            [ 33%]
-tests/test_pawpal.py::test_conflict_detection_overlapping_intervals PASSED [ 41%]
-tests/test_pawpal.py::test_conflict_detection_edge_cases PASSED          [ 50%]
-tests/test_pawpal.py::test_empty_owner_and_edge_conditions PASSED        [ 58%]
-tests/test_pawpal.py::test_pet_task_management_edge_cases PASSED         [ 66%]
-tests/test_pawpal.py::test_recurrence_across_month_boundary PASSED       [ 75%]
-tests/test_pawpal.py::test_scheduler_build_plan_budget_filtering PASSED  [ 83%]
-tests/test_pawpal.py::test_scheduler_find_next_available_slot PASSED     [ 91%]
-tests/test_pawpal.py::test_persistence_json_serialization PASSED         [100%]
+tests/test_pawpal.py::test_task_lifecycle_and_completion PASSED          [  6%]
+tests/test_pawpal.py::test_sorting_chronological_and_priority PASSED     [ 13%]
+tests/test_pawpal.py::test_filter_tasks_by_multiple_criteria PASSED      [ 20%]
+tests/test_pawpal.py::test_daily_recurrence_generation PASSED            [ 26%]
+tests/test_pawpal.py::test_conflict_detection_overlapping_intervals PASSED [ 33%]
+tests/test_pawpal.py::test_conflict_detection_edge_cases PASSED          [ 40%]
+tests/test_pawpal.py::test_empty_owner_and_edge_conditions PASSED        [ 46%]
+tests/test_pawpal.py::test_pet_task_management_edge_cases PASSED         [ 53%]
+tests/test_pawpal.py::test_recurrence_across_month_boundary PASSED       [ 60%]
+tests/test_pawpal.py::test_scheduler_build_plan_budget_filtering PASSED  [ 66%]
+tests/test_pawpal.py::test_scheduler_find_next_available_slot PASSED     [ 73%]
+tests/test_pawpal.py::test_find_next_available_slot_challenge_1 PASSED   [ 80%]
+tests/test_pawpal.py::test_persistence_json_serialization PASSED         [ 86%]
+tests/test_pawpal.py::test_priority_scheduling_challenge_3 PASSED        [ 93%]
+tests/test_pawpal.py::test_cli_formatting_helpers_challenge_4 PASSED     [100%]
 
-============================== 12 passed in 0.10s ==============================
+============================== 15 passed in 0.05s ==============================
 ```
 
 ### System Reliability Confidence Level
